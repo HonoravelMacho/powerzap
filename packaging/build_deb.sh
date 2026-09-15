@@ -15,13 +15,30 @@ mkdir -p \
   "$STAGE/usr/share/icons/hicolor/256x256/apps" \
   "$STAGE/usr/lib/systemd/user"
 
-install -m 755 "$ROOT/dist/powerzap" "$STAGE/usr/bin/powerzap"
-install -m 755 "$ROOT/dist/powerzap-scheduler" "$STAGE/usr/bin/powerzap-scheduler"
+# Localiza binários (flet pack pode gerar em subpasta dist/powerzap/powerzap).
+GUI_BIN="$ROOT/dist/powerzap"
+if [ ! -f "$GUI_BIN" ] && [ -f "$ROOT/dist/powerzap/powerzap" ]; then
+  GUI_BIN="$ROOT/dist/powerzap/powerzap"
+fi
+SCHED_BIN="$ROOT/dist/powerzap-scheduler"
+if [ ! -f "$GUI_BIN" ]; then
+  echo "ERRO: binário GUI não encontrado em dist/powerzap" >&2
+  ls -R "$ROOT/dist" || true
+  exit 1
+fi
+if [ ! -f "$SCHED_BIN" ]; then
+  echo "ERRO: binário scheduler não encontrado em dist/powerzap-scheduler" >&2
+  ls -R "$ROOT/dist" || true
+  exit 1
+fi
+
+install -m 755 "$GUI_BIN" "$STAGE/usr/bin/powerzap"
+install -m 755 "$SCHED_BIN" "$STAGE/usr/bin/powerzap-scheduler"
 install -m 644 "$ROOT/packaging/powerzap.desktop" "$STAGE/usr/share/applications/"
 install -m 644 "$ROOT/assets/icon.png" "$STAGE/usr/share/icons/hicolor/256x256/apps/powerzap.png"
 install -m 644 "$ROOT/packaging/powerzap-scheduler.service" "$STAGE/usr/lib/systemd/user/"
 
-INSTALLED_SIZE=$(( $(du -sk "$ROOT/dist/powerzap" | cut -f1) + $(du -sk "$ROOT/dist/powerzap-scheduler" | cut -f1) ))
+INSTALLED_SIZE=$(( $(du -sk "$GUI_BIN" | cut -f1) + $(du -sk "$SCHED_BIN" | cut -f1) ))
 
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: powerzap

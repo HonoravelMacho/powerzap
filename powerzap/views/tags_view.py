@@ -1,4 +1,6 @@
 """CRUD de etiquetas coloridas."""
+import re
+
 import flet as ft
 
 from powerzap import db
@@ -6,8 +8,11 @@ from powerzap import db
 PALETTE = [
     "#f44336", "#e91e63", "#9c27b0", "#673ab7", "#3f51b5",
     "#2196f3", "#00bcd4", "#009688", "#4caf50", "#8bc34a",
-    "#ff9800", "#ff5722", "#795548", "#607d8b",
+    "#ffc107", "#ff9800", "#ff5722", "#795548", "#607d8b",
+    "#000000", "#ffffff",
 ]
+
+HEX_RE = re.compile(r"^#([0-9a-fA-F]{6})$")
 
 
 class TagDialog(ft.AlertDialog):
@@ -19,33 +24,53 @@ class TagDialog(ft.AlertDialog):
         self.color = tag["color"] if tag else PALETTE[5]
 
         self.name_field = ft.TextField(label="Nome da etiqueta", width=300,
-                                       value=tag["name"] if tag else "")
+                                       value=tag["name"] if tag else "",
+                                       on_change=lambda e: self._refresh_preview())
         self.swatches = ft.Row(wrap=True, spacing=6)
+        # Roda de cores visual + caixa para código hex
+        self.hex_field = ft.TextField(
+            label="Código da cor (#rrggbb)", width=180, value=self.color,
+            hint_text="#2196f3", on_change=lambda e: self._on_hex(),
+        )
+        self.preview_dot = ft.Container(
+            width=16, height=16, border_radius=8, bgcolor=self.color)
+        self.preview_text = ft.Text(self.name_field.value or "Etiqueta", size=14)
 
         self.actions = [
             ft.TextButton("Cancelar", on_click=lambda e: self._close()),
             ft.FilledButton("Salvar", on_click=lambda e: self._save()),
         ]
         self.content = ft.Container(
-            width=360,
+            width=380,
             content=ft.Column([
                 ft.Text("Editar etiqueta" if tag else "Nova etiqueta",
                         size=18, weight=ft.FontWeight.BOLD),
                 self.name_field,
-                ft.Text("Cor", size=13),
+                ft.Text("Cor - toque para escolher", size=13),
                 self.swatches,
-                ft.Container(height=8),
-                self._preview(),
+                ft.Row([self.hex_field, self.preview_dot, self.preview_text],
+                       spacing=8),
+                ft.Text("Dica: use a paleta acima ou digite o código hex. Ex: #22c55e",
+                        size=11, color=ft.colors.with_opacity(0.55, ft.colors.WHITE)),
             ], tight=True, spacing=10),
         )
         self._build_swatches()
 
-    def _preview(self):
-        self.preview_text = ft.Text(self.name_field.value or "Etiqueta", size=14)
-        return ft.Row([
-            ft.Container(width=16, height=16, border_radius=8, bgcolor=self.color),
-            self.preview_text,
-        ])
+    def _refresh_preview(self):
+        try:
+            self.preview_text.value = self.name_field.value or "Etiqueta"
+            self.preview_dot.bgcolor = self.color
+            self.update()
+        except Exception:
+            pass
+
+    def _on_hex(self):
+        val = (self.hex_field.value or "").strip()
+        if HEX_RE.match(val):
+            self.color = val.lower()
+            self._build_swatches()
+            self._refresh_preview()
+        # Se inválido, só ignora até completar - sem travar a digitação
 
     def _build_swatches(self):
         def sw(c):
@@ -59,8 +84,9 @@ class TagDialog(ft.AlertDialog):
 
     def _pick(self, color):
         self.color = color
+        self.hex_field.value = color
         self._build_swatches()
-        self.update()
+        self._refresh_preview()
 
     def _close(self):
         self.page_ref.close(self)
@@ -70,6 +96,13 @@ class TagDialog(ft.AlertDialog):
         if not name:
             self.page_ref.open(ft.SnackBar(ft.Text("Informe o nome da etiqueta.")))
             return
+        hex_val = (self.hex_field.value or "").strip().lower()
+        if hex_val and not HEX_RE.match(hex_val):
+            self.page_ref.open(ft.SnackBar(
+                ft.Text("Código de cor inválido. Use formato #rrggbb, ex: #22c55e")))
+            return
+        if hex_val:
+            self.color = hex_val
         try:
             if self.tag:
                 db.update_tag(self.tag["id"], name, self.color)

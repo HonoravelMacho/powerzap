@@ -1,5 +1,6 @@
 """Configurações da integração com a Evolution API."""
 import threading
+from datetime import datetime
 
 import flet as ft
 
@@ -31,13 +32,23 @@ class SettingsView(ft.Column):
             label="Nome da instância", value=s["instance"],
             prefix_icon=ft.icons.ACCOUNT_CIRCLE_OUTLINED, width=300,
         )
+        self.my_number_field = ft.TextField(
+            label="Meu número (para mensagem de teste)", value=s.get("my_number", ""),
+            hint_text="5511999999999",
+            prefix_icon=ft.icons.PERSON, width=300,
+        )
         self.test_result = ft.Container()
+        self.scheduler_status = ft.Container()
 
         save_btn = ft.FilledButton(
             "Salvar configurações", icon=ft.icons.SAVE, on_click=self.save
         )
         test_btn = ft.OutlinedButton(
             "Testar conexão", icon=ft.icons.NETWORK_CHECK, on_click=self.test
+        )
+        detect_btn = ft.OutlinedButton(
+            "Detectar meu número", icon=ft.icons.PERSON_SEARCH,
+            on_click=self.detect_number,
         )
 
         info = ft.Container(
@@ -61,22 +72,79 @@ class SettingsView(ft.Column):
             ft.Container(width=520, content=self.url_field),
             ft.Container(width=520, content=self.key_field),
             self.instance_field,
-            ft.Row([save_btn, test_btn], alignment=ft.MainAxisAlignment.CENTER),
+            self.my_number_field,
+            ft.Row([save_btn, test_btn, detect_btn],
+                   alignment=ft.MainAxisAlignment.CENTER, wrap=True),
             self.test_result,
+            self.scheduler_status,
             info,
         ]
+        self._refresh_scheduler_status()
 
     def reload(self):
-        pass
+        self._refresh_scheduler_status()
+
+    def _refresh_scheduler_status(self):
+        try:
+            s = db.get_settings()
+            last = s.get("scheduler_last_run", "")
+            pendentes = len(db.list_pending(db._now()))
+            if last:
+                try:
+                    dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+                    diff = (datetime.now() - dt).total_seconds()
+                    if diff < 90:
+                        msg = f"Agendador ativo (último ciclo há {int(diff)}s). {pendentes} pendente(s)."
+                        color = ft.colors.GREEN_400
+                        icon = ft.icons.CHECK_CIRCLE
+                    else:
+                        msg = (f"Agendador parece parado (último ciclo: {last}). "
+                               "Rode: powerzap-scheduler --interval 20")
+                        color = ft.colors.AMBER_400
+                        icon = ft.icons.WARNING
+                except ValueError:
+                    msg, color, icon = f"Último ciclo: {last}", ft.colors.GREY, ft.icons.INFO
+            else:
+                msg = "Agendador ainda não rodou. Rode: powerzap-scheduler --interval 20"
+                color, icon = ft.colors.AMBER_400, ft.icons.INFO
+            self.scheduler_status.content = ft.Row([
+                ft.Icon(icon, color=color), ft.Expanded(ft.Text(msg, size=13))])
+        except Exception:
+            pass
 
     def save(self, e=None):
         url = (self.url_field.value or "").strip()
         key = (self.key_field.value or "").strip()
         inst = (self.instance_field.value or "").strip() or "powerzap"
+        my_num = db.normalize_number(self.my_number_field.value or "")
         db.set_setting("evolution_url", url)
         db.set_setting("api_key", key)
         db.set_setting("instance", inst)
+        db.set_setting("my_number", my_num)
         self.page_ref.open(ft.SnackBar(ft.Text("Configurações salvas!")))
+
+    def detect_number(self, e=None):
+        threading.Thread(target=self._detect_async, daemon=True).start()
+
+    def _detect_async(self):
+        try:
+            owner = get_api().fetch_owner_number()
+        except Exception as ex:
+            owner = None
+            err = str(ex)
+        else:
+            err = ""
+        if owner:
+            self.my_number_field.value = owner
+            db.set_setting("my_number", owner)
+            msg = f"Seu número detectado: {owner}"
+        else:
+            msg = f"Não consegui detectar. Digite manualmente. {err}"[:200]
+        self.page_ref.open(ft.SnackBar(ft.Text(msg)))
+        try:
+            self.update()
+        except AssertionError:
+            pass
 
     def test(self, e=None):
         self.save()
