@@ -225,18 +225,41 @@ class MessageDialog(ft.AlertDialog):
 
     # ----- navegação entre painéis do diálogo -----
 
+    def _safe_refresh(self):
+        """Atualiza a UI a partir de qualquer thread, sem nunca travar."""
+        for fn in (
+            lambda: self.contact_list.update(),
+            lambda: self.picker_status.update(),
+            lambda: self.update(),
+        ):
+            try:
+                fn()
+            except Exception:
+                pass
+        try:
+            if getattr(self, "page_ref", None) is not None:
+                self.page_ref.update()
+        except Exception:
+            pass
+
     def _show_picker(self):
         self.picker_area.visible = True
         self.form_area.visible = False
         for a in self.actions:          # esconde todos os botões na listagem
             a.visible = False
-        self._load_contacts()
         try:
-            self.update()
-        except Exception:
-            pass
+            self._load_contacts()
+        except Exception as ex:
+            self.picker_contacts = []
+            try:
+                self._render_list(
+                    placeholder_override=f"Erro ao ler cache: {ex}")
+            except Exception:
+                pass
+        self._safe_refresh()
         if db.count_contacts() == 0:
             self._set_status("Sincronizando contatos da Evolution API...")
+            self._safe_refresh()
         threading.Thread(target=self._sync_from_api, daemon=True).start()
 
     def _show_form(self):
@@ -244,53 +267,86 @@ class MessageDialog(ft.AlertDialog):
         self.form_area.visible = True
         for a in self.actions:
             a.visible = True
-        try:
-            self.update()
-        except Exception:
-            pass
+        self._safe_refresh()
 
     # ----- contatos e grupos -----
 
     def _load_contacts(self):
+        try:
+            all_contacts = db.list_contacts()
+        except Exception as ex:
+            self.picker_contacts = []
+            self._render_list(
+                placeholder_override=f"Erro no banco local: {ex}")
+            self._set_status(f"Erro no banco local: {ex}")
+            return
         self.picker_contacts = db.filter_local(
-            db.list_contacts(), self.search_field.value or "", self.picker_kind)
+            all_contacts, self.search_field.value or "", self.picker_kind)
         self._render_list()
-        total = db.count_contacts()
-        groups = db.count_groups()
+        try:
+            total = db.count_contacts()
+            groups = db.count_groups()
+        except Exception:
+            total, groups = len(all_contacts), 0
         self._set_status(f"{total} salvo(s) • {groups} grupo(s) em cache.")
 
     def _set_status(self, msg: str):
-        self.picker_status.value = msg
         try:
-            self.picker_status.update()
+            self.picker_status.value = msg
         except Exception:
             pass
+        self._safe_refresh()
 
     def _set_kind(self, kind: str):
         self.picker_kind = kind
         self._filter()
-        try:
-            self.update()
-        except Exception:
-            pass
+        self._safe_refresh()
 
     def _sync_from_api(self):
+        self._set_status("Sincronizando com a Evolution API...")
         try:
             api = get_api()
-            fresh = api.find_all()
+            # Diagnóstico rápido de conexão antes de buscar contatos.
+            try:
+                connected = api.is_connected()
+            except Exception:
+                connected = False
+            try:
+                fresh = api.find_all()
+            except Exception as ex:
+                s = db.get_settings()
+                self._render_list(
+                    placeholder_override=(
+                        f"Falha ao buscar: {ex}\n"
+                        f"URL: {s.get('evolution_url')} | "
+                        f"Instância: {s.get('instance')}\n"
+                        "Confira a aba 'Conexão'."
+                    ))
+                self._set_status(
+                    f"Falha ao buscar contatos: {ex}. "
+                    "Confira URL/instância na aba Ajustes e o status em Conexão.")
+                return
             if fresh:
-                db.replace_contacts(fresh)
+                try:
+                    db.replace_contacts(fresh)
+                except Exception as ex:
+                    self._set_status(f"Erro ao salvar cache: {ex}")
+                    return
             else:
                 # API voltou vazia logo após QR: mantém cache e avisa.
-                cached = db.list_contacts()
+                try:
+                    cached = db.list_contacts()
+                except Exception:
+                    cached = []
                 if cached:
                     self.picker_contacts = db.filter_local(
                         cached, (self.search_field.value or "").strip(),
                         self.picker_kind)
                     self._render_list()
+                    extra = "" if connected else " WhatsApp parece desconectado."
                     self._set_status(
                         "API ainda sincronizando... mostrando cache local. "
-                        "Toque em sincronizar de novo em alguns segundos.")
+                        f"Toque em sincronizar de novo em alguns segundos.{extra}")
                     return
             # Se descobriu o dono, salva como sugestão de "meu número"
             try:
@@ -314,26 +370,59 @@ class MessageDialog(ft.AlertDialog):
                         )
             except Exception:
                 pass
+            try:
+                all_contacts = db.list_contacts()
+            except Exception as ex:
+                self._set_status(f"Erro ao ler cache: {ex}")
+                return
             self.picker_contacts = db.filter_local(
-                db.list_contacts(), (self.search_field.value or "").strip(),
+                all_contacts, (self.search_field.value or "").strip(),
                 self.picker_kind)
             self._render_list()
-            n_groups = sum(1 for c in db.list_contacts() if c.get("is_group"))
-            total = db.count_contacts()
+            try:
+                n_groups = sum(1 for c in all_contacts if c.get("is_group"))
+                total = len(all_contacts)
+            except Exception:
+                total, n_groups = 0, 0
             if total == 0:
+                s = db.get_settings()
+                detail = (
+                    f"URL: {s.get('evolution_url')} | "
+                    f"Instância: {s.get('instance')} | "
+                    f"Conectado: {'sim' if connected else 'não'}"
+                )
+                self._render_list(
+                    placeholder_override=(
+                        "Nenhum contato retornado pela API.\n"
+                        f"{detail}\n"
+                        "1) Abra a aba 'Conexão' e confirme 'Conectado'.\n"
+                        "2) Em 'Ajustes', confira URL, API Key e instância.\n"
+                        "3) Toque em sincronizar de novo."
+                    ))
                 self._set_status(
-                    "Nenhum contato ainda. Confira se o WhatsApp está "
-                    "conectado na aba 'Conexão' e sincronize de novo.")
+                    "Nenhum contato ainda. " + detail)
             else:
                 self._set_status(f"{total} sincronizados ({n_groups} grupos).")
         except Exception as ex:
-            self._set_status(f"Sem conexão com a API — usando cache ({ex.__class__.__name__}).")
+            try:
+                self._render_list(
+                    placeholder_override=f"Erro inesperado: {ex}")
+            except Exception:
+                pass
+            self._set_status(f"Sem conexão com a API — usando cache ({ex}).")
 
     def _filter(self):
-        query = (self.search_field.value or "").strip().lower()
-        self.picker_contacts = db.filter_local(
-            db.list_contacts(), query, self.picker_kind)
-        self._render_list()
+        try:
+            query = (self.search_field.value or "").strip().lower()
+            self.picker_contacts = db.filter_local(
+                db.list_contacts(), query, self.picker_kind)
+            self._render_list()
+        except Exception as ex:
+            try:
+                self._render_list(
+                    placeholder_override=f"Erro ao filtrar: {ex}")
+            except Exception:
+                pass
 
     def _pick_own_number(self):
         self._set_status("Detectando seu número...")
@@ -354,44 +443,56 @@ class MessageDialog(ft.AlertDialog):
         except Exception:
             pass
 
-    def _render_list(self):
+    def _render_list(self, placeholder_override: str | None = None):
         rows = []
-        for ct in self.picker_contacts[:300]:
-            name = ct["name"] or "(sem nome)"
-            is_group = bool(ct.get("is_group"))
-            icon = ft.icons.GROUPS if is_group else ft.icons.PERSON_OUTLINE
-            badge = "Grupo" if is_group else "Contato"
-            rows.append(
-                ft.ListTile(
-                    leading=ft.Icon(icon, color=ft.colors.GREEN_300),
-                    title=ft.Text(f"{name} • {badge}", weight=ft.FontWeight.W_600),
-                    subtitle=ft.Text(ct["number"], size=12,
-                                     color=ft.colors.with_opacity(0.55, ft.colors.WHITE)),
-                    dense=True,
-                    on_click=lambda e, c=dict(ct): self._pick(c),
+        try:
+            contacts = list(self.picker_contacts or [])[:300]
+        except Exception:
+            contacts = []
+        for ct in contacts:
+            try:
+                if not isinstance(ct, dict) or not ct.get("number"):
+                    continue
+                name = ct.get("name") or "(sem nome)"
+                is_group = bool(ct.get("is_group"))
+                icon = ft.icons.GROUPS if is_group else ft.icons.PERSON_OUTLINE
+                badge = "Grupo" if is_group else "Contato"
+                rows.append(
+                    ft.ListTile(
+                        leading=ft.Icon(icon, color=ft.colors.GREEN_300),
+                        title=ft.Text(f"{name} • {badge}", weight=ft.FontWeight.W_600),
+                        subtitle=ft.Text(str(ct.get("number")), size=12,
+                                         color=ft.colors.with_opacity(0.55, ft.colors.WHITE)),
+                        dense=True,
+                        on_click=lambda e, c=dict(ct): self._pick(c),
+                    )
                 )
-            )
+            except Exception:
+                continue
         if not rows:
+            msg = placeholder_override or (
+                "Nada por aqui.\n"
+                "Clique em sincronizar, confira o filtro Todos/Contatos/Grupos\n"
+                "e veja se o WhatsApp está conectado na aba 'Conexão'.\n"
+                "Grupos aparecem após sincronizar."
+            )
             rows.append(ft.Container(
                 padding=30,
                 content=ft.Column([
                     ft.Icon(ft.icons.PHONE_DISABLED_OUTLINED, size=36,
                             color=ft.colors.with_opacity(0.35, ft.colors.WHITE)),
                     ft.Text(
-                        "Nada por aqui.\n"
-                        "Clique em sincronizar, confira o filtro Todos/Contatos/Grupos\n"
-                        "e veja se o WhatsApp está conectado na aba 'Conexão'.\n"
-                        "Grupos aparecem após sincronizar.",
+                        msg,
                         size=12, text_align=ft.TextAlign.CENTER,
                         color=ft.colors.with_opacity(0.55, ft.colors.WHITE),
                     ),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             ))
-        self.contact_list.controls = rows
         try:
-            self.contact_list.update()
+            self.contact_list.controls = rows
         except Exception:
-            pass
+            return
+        self._safe_refresh()
 
     def _pick(self, contact: dict):
         self.number_field.value = contact["number"]
