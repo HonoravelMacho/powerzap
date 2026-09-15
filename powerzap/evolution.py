@@ -87,7 +87,14 @@ class EvolutionAPI:
         data = self._request("GET", f"/instance/connect/{self.instance}", timeout=60)
         if not isinstance(data, dict):
             raise EvolutionError("Resposta inesperada ao gerar QR Code.")
-        b64 = data.get("base64") or data.get("qrcode", {}).get("base64") or ""
+        b64 = data.get("base64") or ""
+        qrcode = data.get("qrcode")
+        if not b64 and isinstance(qrcode, dict):
+            b64 = qrcode.get("base64") or ""
+        if not b64 and isinstance(qrcode, str):
+            b64 = qrcode
+        if not isinstance(b64, str):
+            b64 = ""
         # Algumas versões retornam {"code": "..."} (texto do QR) em vez de base64.
         if not b64 and data.get("code"):
             # Sem base64 não dá para exibir imagem; informa para usar o app.
@@ -95,6 +102,14 @@ class EvolutionAPI:
                 "API retornou código texto sem imagem. Tente gerar de novo."
             )
         if not b64:
+            # Pode já estar conectada: confirma antes de falhar.
+            try:
+                if self.is_connected():
+                    raise EvolutionError("Instância já está conectada. Confira o status.")
+            except EvolutionError:
+                raise
+            except Exception:
+                pass
             raise EvolutionError("Resposta sem QR Code. A instância pode já estar conectada.")
         if not b64.startswith("data:"):
             b64 = "data:image/png;base64," + b64
@@ -106,9 +121,11 @@ class EvolutionAPI:
     def is_connected(self) -> bool:
         try:
             state = self.connection_state()
-        except EvolutionError:
+        except Exception:
             return False
-        info = state.get("instance") or state
+        info = state.get("instance") if isinstance(state, dict) else None
+        if not isinstance(info, dict):
+            info = state if isinstance(state, dict) else {}
         return str(info.get("state", "")).lower() == "open"
 
     def logout(self) -> dict:
