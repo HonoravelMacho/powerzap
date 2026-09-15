@@ -240,15 +240,28 @@ class MessageDialog(ft.AlertDialog):
         ):
             try:
                 fn()
-            except Exception:
-                pass
+            except Exception as ex:
+                try:
+                    from powerzap import crashlog as _cl
+                    _cl.debug(f"refresh falhou {fn}: {ex}")
+                except Exception:
+                    pass
         try:
             if getattr(self, "page_ref", None) is not None:
                 self.page_ref.update()
-        except Exception:
-            pass
+        except Exception as ex:
+            try:
+                from powerzap import crashlog as _cl
+                _cl.debug(f"page refresh falhou: {ex}")
+            except Exception:
+                pass
 
     def _show_picker(self):
+        try:
+            from powerzap import crashlog as _cl
+            _cl.debug("abriu seletor")
+        except Exception:
+            pass
         self.picker_area.visible = True
         self.form_area.visible = False
         for a in self.actions:          # esconde todos os botões na listagem
@@ -263,10 +276,16 @@ class MessageDialog(ft.AlertDialog):
             except Exception:
                 pass
         self._safe_refresh()
-        if db.count_contacts() == 0:
-            self._set_status("Sincronizando contatos da Evolution API...")
-            self._safe_refresh()
-        threading.Thread(target=self._sync_from_api, daemon=True).start()
+        try:
+            if db.count_contacts() == 0:
+                self._set_status("Sincronizando contatos da Evolution API...")
+                self._safe_refresh()
+        except Exception:
+            pass
+        try:
+            threading.Thread(target=self._sync_from_api, daemon=True).start()
+        except Exception:
+            pass
 
     def _show_form(self):
         self.picker_area.visible = False
@@ -286,8 +305,18 @@ class MessageDialog(ft.AlertDialog):
                 placeholder_override=f"Erro no banco local: {ex}")
             self._set_status(f"Erro no banco local: {ex}")
             return
+        try:
+            from powerzap import crashlog as _cl
+            _cl.debug(f"cache lido: {len(all_contacts)} kind={self.picker_kind}")
+        except Exception:
+            pass
         self.picker_contacts = db.filter_local(
             all_contacts, self.search_field.value or "", self.picker_kind)
+        try:
+            from powerzap import crashlog as _cl
+            _cl.debug(f"filtro: {len(self.picker_contacts)} itens")
+        except Exception:
+            pass
         self._render_list()
         try:
             total = db.count_contacts()
@@ -473,6 +502,11 @@ class MessageDialog(ft.AlertDialog):
     def _load_contacts_safe(self):
         """Recarrega do cache na thread da UI (sem thread/API)."""
         try:
+            from powerzap import crashlog as _cl
+            _cl.debug("recarregar lista clicado")
+        except Exception:
+            pass
+        try:
             self._load_contacts()
         except Exception as ex:
             try:
@@ -483,6 +517,7 @@ class MessageDialog(ft.AlertDialog):
 
     def _render_list(self, placeholder_override: str | None = None):
         rows = []
+        render_errors = 0
         try:
             contacts = list(self.picker_contacts or [])[:300]
         except Exception:
@@ -494,21 +529,21 @@ class MessageDialog(ft.AlertDialog):
                 name = (ct.get("name") or "").strip() or str(ct.get("number"))
                 is_group = bool(ct.get("is_group"))
                 badge = "Grupo" if is_group else "Contato"
-                icon = "👥" if is_group else "👤"
-                label = f"{icon} {name} • {badge}\n{ct.get('number')}"
+                label = f"{name}ᴬ{badge}\n{ct.get('number')}"
                 rows.append(
-                    ft.Container(
-                        border_radius=8,
-                        content=ft.TextButton(
-                            text=label,
-                            style=ft.ButtonStyle(
-                                shape=ft.RoundedRectangleBorder(radius=8)),
-                            on_click=lambda e, c=dict(ct): self._pick(c),
-                        ),
+                    ft.TextButton(
+                        text=label.replace("ᴬ", " • "),
+                        on_click=lambda e, c=dict(ct): self._pick(c),
                     )
                 )
             except Exception:
+                render_errors += 1
                 continue
+        try:
+            from powerzap import crashlog as _cl
+            _cl.debug(f"render: {len(rows)} linhas, erros={render_errors}")
+        except Exception:
+            pass
         if not rows:
             msg = placeholder_override or (
                 "Nada por aqui.\n"
