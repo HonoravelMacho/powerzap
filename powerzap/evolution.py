@@ -110,10 +110,22 @@ class EvolutionAPI:
                 raise
             except Exception:
                 pass
-            raise EvolutionError("Resposta sem QR Code. A instância pode já estar conectada.")
+            keys = ",".join(sorted(str(k) for k in data.keys())) or "vazio"
+            raise EvolutionError(
+                f"API não retornou QR (chaves: {keys}). "
+                "Instância travada em 'connecting'? Use 'Reiniciar e gerar QR'."
+            )
         if not b64.startswith("data:"):
             b64 = "data:image/png;base64," + b64
         return b64
+
+    def restart_instance(self) -> dict:
+        """Reinicia a sessão (derruba socket travado em connecting)."""
+        return self._request("PUT", f"/instance/restart/{self.instance}")
+
+    def delete_instance(self) -> dict:
+        """Apaga a instância para recriar do zero (resolve 403/QR ilegível)."""
+        return self._request("DELETE", f"/instance/delete/{self.instance}")
 
     def connection_state(self) -> dict:
         return self._request("GET", f"/instance/connectionState/{self.instance}")

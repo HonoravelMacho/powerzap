@@ -132,23 +132,29 @@ class ConnectView(ft.Column):
                     self.qr_image.visible = False
                     self._set_status()
                     return
-                try:
-                    qr = api.connect_qr()
-                except EvolutionError as ex1:
-                    # Instância pode não existir (404) ou estar fechada.
-                    # Tenta criar e conectar de novo; se já existe (409),
-                    # ignora e tenta conectar mesmo assim.
-                    msg1 = str(ex1)
-                    try:
-                        api.create_instance()
-                    except EvolutionError as ex_create:
-                        if "409" not in str(ex_create) and "already" not in str(ex_create).lower():
-                            # Segue para segunda tentativa de QR de qualquer forma.
-                            pass
+                last_err = ""
+                qr = ""
+                # 3 tentativas: connect direto, create + connect, restart + connect.
+                for attempt in range(3):
                     try:
                         qr = api.connect_qr()
-                    except EvolutionError as ex2:
-                        raise EvolutionError(f"{msg1} | retry: {ex2}")
+                        break
+                    except EvolutionError as ex1:
+                        last_err = str(ex1)
+                        if attempt == 0:
+                            try:
+                                api.create_instance()
+                            except Exception:
+                                pass
+                            time.sleep(2)
+                        elif attempt == 1:
+                            try:
+                                api.restart_instance()
+                            except Exception:
+                                pass
+                            time.sleep(3)
+                if not qr:
+                    raise EvolutionError(last_err or "Sem QR após 3 tentativas.")
                 self.qr_image.visible = True
                 self.qr_image.src = None
                 self.qr_image.src_base64 = qr.split(",", 1)[-1]
@@ -196,27 +202,27 @@ class ConnectView(ft.Column):
         threading.Thread(target=self._set_status, daemon=True).start()
 
     def restart_connection(self, e=None):
-        """Para instância travada em 'connecting': desconecta e gera QR novo."""
+        """Para instância travada em 'connecting': apaga, recria e gera QR novo."""
         self.status_row.controls = [ft.ProgressRing(20)]
         self._safe_update()
 
         def task():
             try:
                 api = get_api()
+                self.status_row.controls = [
+                    ft.Text("Apagando sessão travada...", size=13)]
+                self._safe_update()
+                for fn in (api.logout, api.delete_instance):
+                    try:
+                        fn()
+                    except Exception:
+                        pass
+                    time.sleep(1)
                 try:
-                    api.logout()
+                    api.create_instance()
                 except Exception:
                     pass
                 time.sleep(2)
-                try:
-                    api.create_instance()
-                except EvolutionError as ex_create:
-                    # 403 "already in use" é esperado: só segue para gerar QR.
-                    if "403" not in str(ex_create) and "already" not in str(ex_create).lower():
-                        pass
-                except Exception:
-                    pass
-                time.sleep(1)
             except Exception:
                 pass
             self.generate_qr()

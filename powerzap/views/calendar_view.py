@@ -472,9 +472,10 @@ class MessageDialog(ft.AlertDialog):
         if not rows:
             msg = placeholder_override or (
                 "Nada por aqui.\n"
-                "Clique em sincronizar, confira o filtro Todos/Contatos/Grupos\n"
-                "e veja se o WhatsApp está conectado na aba 'Conexão'.\n"
-                "Grupos aparecem após sincronizar."
+                "1) Confira a aba 'Conexão' (precisa estar Conectado).\n"
+                "2) Em 'Ajustes', salve seu número em 'Meu número'.\n"
+                "3) Para testar sem lista: volte, digite o número manualmente "
+                "no campo Número e salve — não depende do seletor."
             )
             rows.append(ft.Container(
                 padding=30,
