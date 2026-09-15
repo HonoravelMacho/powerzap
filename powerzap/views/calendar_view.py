@@ -175,6 +175,11 @@ class MessageDialog(ft.AlertDialog):
                 target=self._sync_from_api, daemon=True
             ).start(),
         )
+        reload_btn = ft.FilledButton(
+            "Recarregar lista", icon=ft.icons.REFRESH,
+            tooltip="Mostra o cache local sem depender da API/thread",
+            on_click=lambda e: self._load_contacts_safe(),
+        )
         self.kind_all = ft.TextButton("Todos", on_click=lambda e: self._set_kind("all"))
         self.kind_contacts = ft.TextButton("Contatos", on_click=lambda e: self._set_kind("contacts"))
         self.kind_groups = ft.TextButton("Grupos", on_click=lambda e: self._set_kind("groups"))
@@ -197,7 +202,8 @@ class MessageDialog(ft.AlertDialog):
             self.search_field,
             self.contact_list,
             self.picker_status,
-        ], tight=False, spacing=10, visible=False)
+            ft.Row([reload_btn], alignment=ft.MainAxisAlignment.CENTER),
+        ], tight=False, spacing=10, visible=False, scroll=ft.ScrollMode.AUTO)
 
         # ---------- Ações ----------
         self.actions = [
@@ -464,6 +470,17 @@ class MessageDialog(ft.AlertDialog):
         except Exception:
             pass
 
+    def _load_contacts_safe(self):
+        """Recarrega do cache na thread da UI (sem thread/API)."""
+        try:
+            self._load_contacts()
+        except Exception as ex:
+            try:
+                self._render_list(placeholder_override=f"Erro ao ler cache: {ex}")
+            except Exception:
+                pass
+        self._safe_refresh()
+
     def _render_list(self, placeholder_override: str | None = None):
         rows = []
         try:
@@ -474,18 +491,20 @@ class MessageDialog(ft.AlertDialog):
             try:
                 if not isinstance(ct, dict) or not ct.get("number"):
                     continue
-                name = ct.get("name") or "(sem nome)"
+                name = (ct.get("name") or "").strip() or str(ct.get("number"))
                 is_group = bool(ct.get("is_group"))
-                icon = ft.icons.GROUPS if is_group else ft.icons.PERSON_OUTLINE
                 badge = "Grupo" if is_group else "Contato"
+                icon = "👥" if is_group else "👤"
+                label = f"{icon} {name} • {badge}\n{ct.get('number')}"
                 rows.append(
-                    ft.ListTile(
-                        leading=ft.Icon(icon, color=ft.colors.GREEN_300),
-                        title=ft.Text(f"{name} • {badge}", weight=ft.FontWeight.W_600),
-                        subtitle=ft.Text(str(ct.get("number")), size=12,
-                                         color=ft.colors.with_opacity(0.55, ft.colors.WHITE)),
-                        dense=True,
-                        on_click=lambda e, c=dict(ct): self._pick(c),
+                    ft.Container(
+                        border_radius=8,
+                        content=ft.TextButton(
+                            text=label,
+                            style=ft.ButtonStyle(
+                                shape=ft.RoundedRectangleBorder(radius=8)),
+                            on_click=lambda e, c=dict(ct): self._pick(c),
+                        ),
                     )
                 )
             except Exception:
