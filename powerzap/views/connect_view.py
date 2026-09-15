@@ -51,13 +51,18 @@ class ConnectView(ft.Column):
             style=ft.ButtonStyle(color=ft.colors.RED_300),
             on_click=self.logout,
         )
+        restart_btn = ft.OutlinedButton(
+            "Reiniciar e gerar QR", icon=ft.icons.REFRESH,
+            tooltip="Desconecta a instância travada em 'connecting' e gera um QR novo",
+            on_click=self.restart_connection,
+        )
 
         self.controls = [
             ft.Container(height=20),
             title, subtitle,
             ft.Container(self.status_row, height=36),
             self.qr_image,
-            ft.Row([gen_btn, check_btn, logout_btn],
+            ft.Row([gen_btn, check_btn, logout_btn, restart_btn],
                    alignment=ft.MainAxisAlignment.CENTER, wrap=True),
         ]
         self.reload()
@@ -157,7 +162,7 @@ class ConnectView(ft.Column):
                 self.qr_image.visible = False
                 self.status_row.controls = [
                     ft.Icon(ft.icons.ERROR_OUTLINE, color=ft.colors.RED_400),
-                    ft.Expanded(ft.Text(str(ex), size=13)),
+                    ft.Container(content=ft.Text(str(ex), size=13), expand=True),
                 ]
                 self._safe_update()
 
@@ -181,7 +186,7 @@ class ConnectView(ft.Column):
                 return
             if raw == "close":
                 self.status_row.controls = [
-                    ft.Icon(ft.icons.QR_CODE_2_OFF, color=ft.colors.RED_400),
+                    ft.Icon(ft.icons.QR_CODE_2_OUTLINED, color=ft.colors.RED_400),
                     ft.Text("QR Code expirou — clique em 'Gerar QR Code' novamente."),
                 ]
                 self._safe_update()
@@ -189,6 +194,34 @@ class ConnectView(ft.Column):
 
     def check_status(self, e=None):
         threading.Thread(target=self._set_status, daemon=True).start()
+
+    def restart_connection(self, e=None):
+        """Para instância travada em 'connecting': desconecta e gera QR novo."""
+        self.status_row.controls = [ft.ProgressRing(20)]
+        self._safe_update()
+
+        def task():
+            try:
+                api = get_api()
+                try:
+                    api.logout()
+                except Exception:
+                    pass
+                time.sleep(2)
+                try:
+                    api.create_instance()
+                except EvolutionError as ex_create:
+                    # 403 "already in use" é esperado: só segue para gerar QR.
+                    if "403" not in str(ex_create) and "already" not in str(ex_create).lower():
+                        pass
+                except Exception:
+                    pass
+                time.sleep(1)
+            except Exception:
+                pass
+            self.generate_qr()
+
+        threading.Thread(target=task, daemon=True).start()
 
     def logout(self, e=None):
         try:

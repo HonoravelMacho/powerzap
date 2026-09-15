@@ -108,7 +108,8 @@ class SettingsView(ft.Column):
                 msg = "Agendador ainda não rodou. Rode: powerzap-scheduler --interval 20"
                 color, icon = ft.colors.AMBER_400, ft.icons.INFO
             self.scheduler_status.content = ft.Row([
-                ft.Icon(icon, color=color), ft.Expanded(ft.Text(msg, size=13))])
+                ft.Icon(icon, color=color),
+                ft.Container(content=ft.Text(msg, size=13), expand=True)])
         except Exception:
             pass
 
@@ -165,7 +166,8 @@ class SettingsView(ft.Column):
         except Exception as ex:
             msg, color, icon = f"Erro: {ex}", ft.colors.RED_400, ft.icons.ERROR_OUTLINE
         self.test_result.content = ft.Row([
-            ft.Icon(icon, color=color), ft.Expanded(ft.Text(msg, size=13)),
+            ft.Icon(icon, color=color),
+            ft.Container(content=ft.Text(msg, size=13), expand=True),
         ])
         try:
             self.update()
