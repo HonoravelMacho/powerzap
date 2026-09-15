@@ -311,21 +311,45 @@ class MessageDialog(ft.AlertDialog):
                 connected = api.is_connected()
             except Exception:
                 connected = False
+            # Busca cada fonte separada para mostrar contagem real
+            # (contatos / conversas / grupos) em vez de esconder falha.
             try:
-                fresh = api.find_all()
-            except Exception as ex:
-                s = db.get_settings()
-                self._render_list(
-                    placeholder_override=(
-                        f"Falha ao buscar: {ex}\n"
-                        f"URL: {s.get('evolution_url')} | "
-                        f"Instância: {s.get('instance')}\n"
-                        "Confira a aba 'Conexão'."
-                    ))
-                self._set_status(
-                    f"Falha ao buscar contatos: {ex}. "
-                    "Confira URL/instância na aba Ajustes e o status em Conexão.")
-                return
+                contacts = api.find_contacts()
+            except Exception:
+                contacts = []
+            try:
+                chats = api.find_chats()
+            except Exception:
+                chats = []
+            try:
+                groups = api.fetch_groups()
+            except Exception:
+                groups = []
+            try:
+                owner = api.fetch_owner_number()
+            except Exception:
+                owner = None
+            merged: dict = {}
+            for ct in (contacts or []) + (chats or []) + (groups or []):
+                if not isinstance(ct, dict) or not ct.get("number"):
+                    continue
+                key = ct["number"]
+                if key not in merged or (not merged[key]["name"] and ct["name"]):
+                    merged[key] = ct
+            if owner and owner not in merged:
+                merged[owner] = {"number": owner, "name": "Você (este número)",
+                                 "is_group": False}
+            try:
+                saved_raw = (db.get_settings().get("my_number") or "").strip()
+                saved = db.normalize_number(saved_raw) if saved_raw else ""
+            except Exception:
+                saved = ""
+            if saved and saved not in merged:
+                merged[saved] = {"number": saved, "name": "Meu número",
+                                 "is_group": False}
+            fresh = list(merged.values())
+            dbg = (f"C:{len(contacts or [])} Ch:{len(chats or [])} "
+                   f"G:{len(groups or [])} dono:{owner or '-'}")
             if fresh:
                 try:
                     db.replace_contacts(fresh)
@@ -345,12 +369,11 @@ class MessageDialog(ft.AlertDialog):
                     self._render_list()
                     extra = "" if connected else " WhatsApp parece desconectado."
                     self._set_status(
-                        "API ainda sincronizando... mostrando cache local. "
-                        f"Toque em sincronizar de novo em alguns segundos.{extra}")
+                        f"API vazia ({dbg})... mostrando cache. "
+                        f"Toque em sincronizar de novo.{extra}")
                     return
             # Se descobriu o dono, salva como sugestão de "meu número"
             try:
-                owner = api.fetch_owner_number()
                 if owner:
                     s = db.get_settings()
                     if not (s.get("my_number") or "").strip():
@@ -359,9 +382,7 @@ class MessageDialog(ft.AlertDialog):
                 pass
             # Garante "meu número" salvo mesmo sem detecção automática.
             try:
-                saved = (db.get_settings().get("my_number") or "").strip()
                 if saved:
-                    saved = db.normalize_number(saved)
                     local = db.list_contacts()
                     if saved and not any(c["number"] == saved for c in local):
                         db.replace_contacts(
@@ -389,7 +410,7 @@ class MessageDialog(ft.AlertDialog):
                 detail = (
                     f"URL: {s.get('evolution_url')} | "
                     f"Instância: {s.get('instance')} | "
-                    f"Conectado: {'sim' if connected else 'não'}"
+                    f"Conectado: {'sim' if connected else 'não'} | {dbg}"
                 )
                 self._render_list(
                     placeholder_override=(
@@ -402,7 +423,7 @@ class MessageDialog(ft.AlertDialog):
                 self._set_status(
                     "Nenhum contato ainda. " + detail)
             else:
-                self._set_status(f"{total} sincronizados ({n_groups} grupos).")
+                self._set_status(f"{total} sincronizados ({n_groups} grupos) | {dbg}.")
         except Exception as ex:
             try:
                 self._render_list(

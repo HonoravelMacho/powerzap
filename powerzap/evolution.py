@@ -230,14 +230,32 @@ class EvolutionAPI:
 
     def find_contacts(self) -> list:
         """Lista contatos individuais (endpoint original)."""
-        try:
-            data = self._request("POST", f"/chat/findContacts/{self.instance}",
-                                 {}, timeout=120)
-        except EvolutionError:
+        rows = []
+        last_err = None
+        for body in ({"where": {}}, {}):
+            try:
+                data = self._request("POST", f"/chat/findContacts/{self.instance}",
+                                     body, timeout=120)
+                last_err = None
+                break
+            except EvolutionError as ex:
+                last_err = ex
+                # Se o primeiro corpo falhar, tenta o alternativo.
+                continue
+        else:
             return []
-        rows = data.get("contacts") if isinstance(data, dict) else (data or [])
-        if isinstance(rows, dict):
-            rows = list(rows.values())
+        if isinstance(data, dict):
+            rows = data.get("contacts", data.get("data", data.get("records", [])))
+            if isinstance(rows, dict):
+                rows = list(rows.values())
+            if not isinstance(rows, list):
+                # Resposta pode ser {"id": {...}} mapeado.
+                if all(isinstance(v, dict) for v in data.values()):
+                    rows = list(data.values())
+                else:
+                    rows = []
+        elif isinstance(data, list):
+            rows = data
         out = []
         for r in (rows or []):
             parsed = self._parse_contact_row(r) if isinstance(r, dict) else None
@@ -247,11 +265,18 @@ class EvolutionAPI:
 
     def fetch_groups(self) -> list:
         """Busca grupos via GET /group/fetchAllGroups."""
-        try:
-            data = self._request(
-                "GET", f"/group/fetchAllGroups/{self.instance}?getParticipants=false",
-                timeout=120)
-        except EvolutionError:
+        data = None
+        for query in ("getParticipants=false", "getParticipants=true", ""):
+            try:
+                path = f"/group/fetchAllGroups/{self.instance}"
+                if query:
+                    path += f"?{query}"
+                data = self._request("GET", path, timeout=120)
+                break
+            except EvolutionError:
+                data = None
+                continue
+        if data is None:
             return []
         if isinstance(data, list):
             rows = data
@@ -281,8 +306,24 @@ class EvolutionAPI:
             data = self._request("POST", f"/chat/findChats/{self.instance}",
                                  {}, timeout=120)
         except EvolutionError:
-            return []
-        rows = data.get("chats") if isinstance(data, dict) else (data or [])
+            # Tenta formato Query da v2.3.7.
+            try:
+                data = self._request("POST", f"/chat/findChats/{self.instance}",
+                                     {"where": {}, "orderBy": {"createdAt": "desc"}},
+                                     timeout=120)
+            except EvolutionError:
+                return []
+        if isinstance(data, dict):
+            rows = (data.get("chats") or data.get("data")
+                    or data.get("records") or data.get("messages") or [])
+            if isinstance(rows, dict):
+                rows = list(rows.values())
+            if not isinstance(rows, list):
+                rows = []
+        elif isinstance(data, list):
+            rows = data
+        else:
+            rows = []
         out = []
         for r in (rows or []):
             if not isinstance(r, dict):
