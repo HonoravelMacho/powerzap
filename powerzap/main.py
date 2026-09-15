@@ -80,7 +80,71 @@ def main(page: ft.Page):
     switch(0)
 
 
+def diagnose():
+    """Modo diagnóstico via terminal para o seletor visual."""
+    db.init_db()
+    total = db.count_contacts()
+    groups = db.count_groups()
+    contacts = db.list_contacts()
+    s = db.get_settings()
+    print(f"PowerZap diagnóstico")
+    print(f"  DB: {db.DB_PATH}")
+    print(f"  Total contatos no cache: {total} | grupos: {groups}")
+    print(f"  Settings: url={s.get('evolution_url')} instance={s.get('instance')} my_number={s.get('my_number')}")
+    print(f"  Amostra (3):")
+    for c in contacts[:3]:
+        print(f"    - {c['number']} | {c['name']!r} | grupo={bool(c['is_group'])}")
+    try:
+        from powerzap.views.connect_view import get_api
+        api = get_api()
+        print(f"  Evolution: {api.url} instance={api.instance}")
+        try:
+            st = api.connection_state()
+            print(f"  connectionState: {str(st)[:500]}")
+        except Exception as ex:
+            print(f"  connectionState erro: {ex}")
+        try:
+            print(f"  find_contacts: {len(api.find_contacts())}")
+        except Exception as ex:
+            print(f"  find_contacts erro: {ex}")
+        try:
+            print(f"  find_chats: {len(api.find_chats())}")
+        except Exception as ex:
+            print(f"  find_chats erro: {ex}")
+        try:
+            print(f"  fetch_groups: {len(api.fetch_groups())}")
+        except Exception as ex:
+            print(f"  fetch_groups erro: {ex}")
+        try:
+            print(f"  owner: {api.fetch_owner_number()}")
+        except Exception as ex:
+            print(f"  owner erro: {ex}")
+    except Exception as ex:
+        print(f"  Erro diagnóstico API: {ex}")
+
+    # Teste de render do seletor (sem UI)
+    try:
+        from powerzap.views.calendar_view import MessageDialog
+        class FakePage:
+            overlay = []
+            def update(self): pass
+            def open(self, c): pass
+            def close(self, c): pass
+        dlg = MessageDialog(FakePage(), on_done=lambda: None)
+        dlg._load_contacts()
+        print(f"  Seletor render: {len(dlg.picker_contacts)} filtrados | {len(dlg.contact_list.controls)} controles | status={dlg.picker_status.value!r}")
+        print("  OK: seletor renderizou sem erro")
+    except Exception as ex:
+        import traceback
+        print(f"  Seletor erro: {ex}")
+        traceback.print_exc()
+
+
 def app():
+    import sys
+    if "--diagnose" in sys.argv or "--diagnostico" in sys.argv:
+        diagnose()
+        return
     ft.app(target=main)
 
 

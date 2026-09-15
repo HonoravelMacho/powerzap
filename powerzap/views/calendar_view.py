@@ -162,7 +162,9 @@ class MessageDialog(ft.AlertDialog):
         )
         self.picker_status = ft.Text("", size=12,
                                      color=ft.colors.with_opacity(0.6, ft.colors.WHITE))
-        self.contact_list = ft.ListView(height=380, spacing=4)
+        self.diag_text = ft.Text("", size=10,
+                                 color=ft.colors.with_opacity(0.45, ft.colors.WHITE))
+        self.contact_list = ft.ListView(height=320, spacing=2, expand=False)
 
         back_btn = ft.IconButton(
             icon=ft.icons.ARROW_BACK,
@@ -189,6 +191,8 @@ class MessageDialog(ft.AlertDialog):
                 target=self._pick_own_number, daemon=True).start(),
         )
 
+        diag_btn = ft.TextButton("Diagnóstico", icon=ft.icons.BUG_REPORT,
+                                     on_click=lambda e: self._show_diag())
         self.picker_area = ft.Column([
             ft.Row([
                 back_btn,
@@ -200,10 +204,13 @@ class MessageDialog(ft.AlertDialog):
                     ft.Container(expand=True), self.me_btn],
                    spacing=4, wrap=True),
             self.search_field,
-            self.contact_list,
+            ft.Container(content=self.contact_list, height=320,
+                         border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
+                         border_radius=8, padding=4),
             self.picker_status,
-            ft.Row([reload_btn], alignment=ft.MainAxisAlignment.CENTER),
-        ], tight=False, spacing=10, visible=False, scroll=ft.ScrollMode.AUTO)
+            self.diag_text,
+            ft.Row([reload_btn, diag_btn], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
+        ], tight=False, spacing=8, visible=False, scroll=ft.ScrollMode.AUTO)
 
         # ---------- Ações ----------
         self.actions = [
@@ -221,12 +228,13 @@ class MessageDialog(ft.AlertDialog):
 
         self.content = ft.Container(
             width=560,
+            height=620,
             content=ft.Column([
                 ft.Text("Editar mensagem" if message else "Nova mensagem agendada",
                         size=18, weight=ft.FontWeight.BOLD),
                 self.form_area,
                 self.picker_area,
-            ], tight=True, spacing=14),
+            ], tight=False, spacing=14, scroll=ft.ScrollMode.AUTO),
         )
 
     # ----- navegação entre painéis do diálogo -----
@@ -330,7 +338,34 @@ class MessageDialog(ft.AlertDialog):
             self.picker_status.value = msg
         except Exception:
             pass
+        try:
+            self.diag_text.value = f"DB: {db.DB_PATH} | cache={db.count_contacts()} grupos={db.count_groups()}"
+        except Exception:
+            pass
         self._safe_refresh()
+
+    def _show_diag(self):
+        try:
+            all_c = db.list_contacts()
+            filt = len(self.picker_contacts)
+            total = len(all_c)
+            groups = sum(1 for c in all_c if c.get("is_group"))
+            s = db.get_settings()
+            msg = f"Cache {total} ({groups} grupos) | filtro={self.picker_kind} => {filt} | DB {db.DB_PATH}"
+            try:
+                from powerzap import crashlog as _cl
+                _cl.debug(msg)
+            except Exception:
+                pass
+            self.page_ref.open(ft.SnackBar(ft.Text(msg)))
+            # Também copia diagnóstico para área de texto da busca
+            self.diag_text.value = msg + f" | url={s.get('evolution_url')}"
+            self._safe_refresh()
+        except Exception as ex:
+            try:
+                self.page_ref.open(ft.SnackBar(ft.Text(f"Diag erro: {ex}")))
+            except Exception:
+                pass
 
     def _set_kind(self, kind: str):
         self.picker_kind = kind
@@ -520,7 +555,12 @@ class MessageDialog(ft.AlertDialog):
         render_errors = 0
         try:
             contacts = list(self.picker_contacts or [])[:300]
-        except Exception:
+        except Exception as ex:
+            try:
+                from powerzap import crashlog as _cl
+                _cl.debug(f"render input erro: {ex}")
+            except Exception:
+                pass
             contacts = []
         for ct in contacts:
             try:
@@ -529,19 +569,33 @@ class MessageDialog(ft.AlertDialog):
                 name = (ct.get("name") or "").strip() or str(ct.get("number"))
                 is_group = bool(ct.get("is_group"))
                 badge = "Grupo" if is_group else "Contato"
-                label = f"{name}ᴬ{badge}\n{ct.get('number')}"
+                number = str(ct.get("number"))
+                # Botão simples com nome + número, sem ícones que podem falhar
+                label = f"{name} • {badge}\n{number}"
                 rows.append(
-                    ft.TextButton(
-                        text=label.replace("ᴬ", " • "),
+                    ft.Container(
+                        bgcolor=ft.colors.with_opacity(0.06, ft.colors.WHITE),
+                        border_radius=8,
+                        padding=8,
+                        ink=True,
                         on_click=lambda e, c=dict(ct): self._pick(c),
+                        content=ft.Column([
+                            ft.Text(f"{name} • {badge}", weight=ft.FontWeight.W_600, size=13),
+                            ft.Text(number, size=11, color=ft.colors.with_opacity(0.7, ft.colors.WHITE)),
+                        ], tight=True, spacing=2),
                     )
                 )
-            except Exception:
+            except Exception as ex:
                 render_errors += 1
+                try:
+                    from powerzap import crashlog as _cl
+                    _cl.debug(f"render item erro {ct}: {ex}")
+                except Exception:
+                    pass
                 continue
         try:
             from powerzap import crashlog as _cl
-            _cl.debug(f"render: {len(rows)} linhas, erros={render_errors}")
+            _cl.debug(f"render: {len(rows)} linhas, erros={render_errors}, override={bool(placeholder_override)}")
         except Exception:
             pass
         if not rows:
