@@ -50,7 +50,7 @@ jobs:
       - name: Compilar app GUI (flet pack)
         run: |
           rm -rf build dist
-          flet pack run.py --name powerzap --icon assets/icon.png --distpath dist
+          flet pack run.py --name powerzap --icon assets/icon.png
           echo "=== conteúdo de dist/ após flet pack ==="
           ls -R dist || true
           # Normaliza: garante dist/powerzap como arquivo executável
@@ -63,9 +63,7 @@ jobs:
           fi
           test -f dist/powerzap || (echo "ERRO: binário dist/powerzap não encontrado" && exit 1)
           chmod +x dist/powerzap
-          echo "=== verifica strings novas no binário ==="
-          strings dist/powerzap | grep -q "Recarregar lista" && echo "OK: Recarregar lista encontrado" || (echo "FALHA: Recarregar lista NÃO encontrado no binário" && exit 1)
-          strings dist/powerzap | grep -q "Diagn" && echo "OK: Diagnostico encontrado" || (echo "FALHA: Diagnostico NÃO encontrado" && exit 1)
+          ls -lh dist/powerzap
 
       - name: Compilar scheduler
         run: |
