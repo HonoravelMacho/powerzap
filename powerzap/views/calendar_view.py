@@ -205,9 +205,9 @@ class MessageDialog(ft.AlertDialog):
                     ft.Container(expand=True), self.me_btn],
                    spacing=4, wrap=True),
             self.search_field,
-            ft.Container(content=self.contact_list, height=330,
-                         border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
-                         border_radius=8, padding=4, bgcolor=ft.colors.with_opacity(0.02, ft.colors.WHITE)),
+            ft.Container(content=self.contact_list, height=340,
+                         border=ft.border.all(2, ft.colors.GREEN_400),
+                         border_radius=8, padding=4, bgcolor=ft.colors.with_opacity(0.04, ft.colors.WHITE)),
             self.picker_status,
             self.diag_text,
             ft.Row([reload_btn, diag_btn], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
@@ -571,18 +571,18 @@ class MessageDialog(ft.AlertDialog):
                 is_group = bool(ct.get("is_group"))
                 badge = "Grupo" if is_group else "Contato"
                 number = str(ct.get("number"))
-                # Botão simples com nome + número, sem ícones que podem falhar
-                label = f"{name} • {badge}\n{number}"
+                # Cartão com borda forte e clique, visível em qualquer tema
                 rows.append(
                     ft.Container(
-                        bgcolor=ft.colors.with_opacity(0.06, ft.colors.WHITE),
+                        bgcolor=ft.colors.with_opacity(0.12, ft.colors.WHITE),
+                        border=ft.border.all(1, ft.colors.with_opacity(0.25, ft.colors.WHITE)),
                         border_radius=8,
-                        padding=8,
+                        padding=10,
                         ink=True,
                         on_click=lambda e, c=dict(ct): self._pick(c),
                         content=ft.Column([
-                            ft.Text(f"{name} • {badge}", weight=ft.FontWeight.W_600, size=13),
-                            ft.Text(number, size=11, color=ft.colors.with_opacity(0.7, ft.colors.WHITE)),
+                            ft.Text(f"{name} • {badge}", weight=ft.FontWeight.BOLD, size=13, color=ft.colors.WHITE),
+                            ft.Text(number, size=11, color=ft.colors.AMBER_200),
                         ], tight=True, spacing=2),
                     )
                 )
