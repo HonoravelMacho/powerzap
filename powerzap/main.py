@@ -124,15 +124,15 @@ def diagnose():
 
     # Teste de render do seletor (sem UI)
     try:
-        from powerzap.views.calendar_view import MessageDialog
+        from powerzap.views.calendar_view import ContactPickerView
         class FakePage:
+            views = []
             overlay = []
             def update(self): pass
             def open(self, c): pass
             def close(self, c): pass
-        dlg = MessageDialog(FakePage(), on_done=lambda: None)
-        dlg._load_contacts()
-        print(f"  Seletor render: {len(dlg.picker_contacts)} filtrados | {len(dlg.contact_list.controls)} controles | status={dlg.picker_status.value!r}")
+        picker = ContactPickerView(FakePage(), on_pick=lambda c: None, on_back=lambda: None)
+        print(f"  Seletor render: {len(picker.picker_contacts)} filtrados | {len(picker.list_col.controls)} controles | status={picker.status.value!r}")
         print("  OK: seletor renderizou sem erro")
     except Exception as ex:
         import traceback

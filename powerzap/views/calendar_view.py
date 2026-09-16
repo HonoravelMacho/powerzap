@@ -32,6 +32,243 @@ def _log(msg: str):
         pass
 
 
+class ContactPickerView(ft.View):
+    """Tela cheia para escolher contato/grupo. Usa page.views (rota),
+    que renderiza controle dinâmico de forma confiável no Flet 0.24.1."""
+
+    def __init__(self, page_ref, on_pick, on_back):
+        super().__init__(bgcolor=ft.colors.BLACK)
+        self.page_ref = page_ref
+        self.on_pick_cb = on_pick
+        self.on_back_cb = on_back
+        self.picker_contacts: list = []
+        self.picker_kind = "all"
+
+        self.search = ft.TextField(
+            label="Buscar por nome ou número...",
+            prefix_icon=ft.icons.SEARCH,
+            border_radius=10,
+            on_change=lambda e: self._filter(),
+            expand=True,
+        )
+        self.status = ft.Text("Carregando...", size=12)
+        self.diag = ft.Text("", size=10,
+                            color=ft.colors.with_opacity(0.5, ft.colors.WHITE))
+        self.list_col = ft.Column(spacing=4, height=480, scroll=ft.ScrollMode.AUTO)
+
+        self.kind_all = ft.TextButton(
+            "Todos", on_click=lambda e: self._set_kind("all"))
+        self.kind_contacts = ft.TextButton(
+            "Contatos", on_click=lambda e: self._set_kind("contacts"))
+        self.kind_groups = ft.TextButton(
+            "Grupos", on_click=lambda e: self._set_kind("groups"))
+
+        back_btn = ft.IconButton(
+            ft.icons.ARROW_BACK, icon_size=28,
+            tooltip="Voltar ao formulário", on_click=lambda e: self._finish(None))
+        header = ft.Row([
+            back_btn,
+            ft.Text("Selecionar destino", size=22, weight=ft.FontWeight.BOLD),
+            ft.Container(expand=True),
+        ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        kind_row = ft.Row([
+            self.kind_all, self.kind_contacts, self.kind_groups,
+            ft.Container(expand=True),
+            ft.OutlinedButton("Você (meu número)", icon=ft.icons.PERSON,
+                              on_click=lambda e: self._pick_own()),
+        ], spacing=4, wrap=True)
+
+        list_box = ft.Container(
+            content=self.list_col, height=480, expand=True,
+            border=ft.border.all(2, ft.colors.GREEN_400),
+            border_radius=10, padding=8,
+            bgcolor=ft.colors.with_opacity(0.05, ft.colors.WHITE),
+        )
+        bottom = ft.Row([
+            ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
+                            on_click=lambda e: self._sync()),
+            ft.FilledButton("Recarregar cache", icon=ft.icons.REFRESH,
+                            on_click=lambda e: self._load_cache()),
+            ft.Container(expand=True),
+        ], spacing=8)
+
+        self.controls = [
+            ft.Container(
+                padding=20, expand=True,
+                content=ft.Column([
+                    header,
+                    ft.Divider(height=1),
+                    kind_row,
+                    self.search,
+                    list_box,
+                    self.status,
+                    self.diag,
+                    bottom,
+                ], spacing=10, scroll=ft.ScrollMode.AUTO),
+            )
+        ]
+
+        self._load_cache()
+        try:
+            if db.count_contacts() == 0:
+                self._sync()
+            else:
+                self._sync()
+        except Exception:
+            pass
+
+    # ----- navegação -----
+
+    def _finish(self, contact):
+        try:
+            if self in self.page_ref.views:
+                self.page_ref.views.remove(self)
+            self.page_ref.update()
+        except Exception:
+            pass
+        if contact:
+            self.on_pick_cb(contact)
+        else:
+            self.on_back_cb()
+
+    # ----- dados -----
+
+    def _set_kind(self, kind):
+        self.picker_kind = kind
+        self._filter()
+
+    def _load_cache(self):
+        try:
+            all_contacts = db.list_contacts()
+            self.picker_contacts = db.filter_local(
+                all_contacts, self.search.value or "", self.picker_kind)
+            total = db.count_contacts()
+            groups = db.count_groups()
+            self.status.value = f"{total} salvo(s) • {groups} grupo(s) em cache."
+            self.diag.value = f"DB: {db.DB_PATH}"
+            _log(f"picker: cache {total} grupos {groups} "
+                 f"filtro {len(self.picker_contacts)}")
+            self._render()
+        except Exception as ex:
+            _log(f"picker cache erro: {ex}")
+            self.status.value = f"Erro ao ler cache: {ex}"
+            self._render(placeholder="Cache indisponível")
+        self._refresh()
+
+    def _filter(self):
+        try:
+            q = (self.search.value or "").strip().lower()
+            all_contacts = db.list_contacts()
+            self.picker_contacts = db.filter_local(all_contacts, q, self.picker_kind)
+            _log(f"picker filtro: {self.picker_kind} q={q[:20]!r} -> "
+                 f"{len(self.picker_contacts)}")
+            self._render()
+        except Exception as ex:
+            _log(f"picker filtro erro: {ex}")
+            self._render(placeholder=f"Erro: {ex}")
+        self._refresh()
+
+    def _render(self, placeholder: str | None = None):
+        rows: list = []
+        for ct in (self.picker_contacts or [])[:300]:
+            try:
+                if not isinstance(ct, dict) or not ct.get("number"):
+                    continue
+                name = (ct.get("name") or "").strip() or str(ct.get("number"))
+                is_group = bool(ct.get("is_group"))
+                badge = "Grupo" if is_group else "Contato"
+                number = str(ct.get("number"))
+                rows.append(ft.Container(
+                    bgcolor=ft.colors.with_opacity(0.15, ft.colors.WHITE),
+                    border=ft.border.all(1, ft.colors.with_opacity(0.3, ft.colors.WHITE)),
+                    border_radius=8, padding=10, ink=True,
+                    on_click=lambda e, c=dict(ct): self._finish(c),
+                    content=ft.Column([
+                        ft.Text(f"{name} • {badge}", weight=ft.FontWeight.BOLD,
+                                size=14, color=ft.colors.WHITE),
+                        ft.Text(number, size=11, color=ft.colors.AMBER_200),
+                    ], tight=True, spacing=2),
+                ))
+            except Exception:
+                continue
+        if not rows:
+            msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
+                                  "contatos e grupos.")
+            rows.append(ft.Container(
+                padding=40,
+                content=ft.Column([
+                    ft.Icon(ft.icons.PEOPLE_OUTLINE, size=40,
+                            color=ft.colors.with_opacity(0.4, ft.colors.WHITE)),
+                    ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
+                            color=ft.colors.with_opacity(0.6, ft.colors.WHITE)),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)))
+        self.list_col.controls = rows
+
+    def _refresh(self):
+        for fn in (lambda: self.list_col.update(),
+                   lambda: self.status.update(),
+                   lambda: self.page_ref.update()):
+            try:
+                fn()
+            except Exception:
+                pass
+
+    def _pick_own(self):
+        self.status.value = "Detectando seu número..."
+        self._refresh()
+        try:
+            owner = get_api().fetch_owner_number()
+        except Exception:
+            owner = None
+        if not owner:
+            owner = (db.get_settings().get("my_number") or "").strip()
+        if not owner:
+            self.status.value = "Não achei. Configure em Ajustes > Meu número."
+            self._refresh()
+            return
+        self._finish({"number": owner, "name": "Você", "is_group": False})
+
+    def _sync(self):
+        self.status.value = "Sincronizando com a Evolution API..."
+        self._refresh()
+        try:
+            api = get_api()
+            contacts = api.find_contacts() or []
+            chats = api.find_chats() or []
+            groups = api.fetch_groups() or []
+            owner = api.fetch_owner_number()
+            merged: dict = {}
+            for ct in contacts + chats + groups:
+                if not isinstance(ct, dict) or not ct.get("number"):
+                    continue
+                k = ct["number"]
+                if k not in merged or (not merged[k]["name"] and ct.get("name")):
+                    merged[k] = ct
+            if owner and owner not in merged:
+                merged[owner] = {"number": owner, "name": "Você",
+                                 "is_group": False}
+            saved = (db.get_settings().get("my_number") or "").strip()
+            saved = db.normalize_number(saved) if saved else ""
+            if saved and saved not in merged:
+                merged[saved] = {"number": saved, "name": "Meu número",
+                                 "is_group": False}
+            fresh = list(merged.values())
+            if fresh:
+                db.replace_contacts(fresh)
+            self.picker_contacts = db.filter_local(
+                db.list_contacts(), self.search.value or "", self.picker_kind)
+            self._render()
+            n_groups = sum(1 for c in db.list_contacts() if c.get("is_group"))
+            self.status.value = (
+                f"{db.count_contacts()} sincronizados ({n_groups} grupos)")
+        except Exception as ex:
+            _log(f"picker sync erro: {ex}")
+            self._render(placeholder=f"Erro na API: {ex}")
+            self.status.value = f"Sem conexão — usando cache ({ex})"
+        self._refresh()
+
+
 class MessageDialog(ft.AlertDialog):
     """Diálogo que alterna entre formulário e seletor visual de contatos."""
 
@@ -178,185 +415,50 @@ class MessageDialog(ft.AlertDialog):
     # ==================== Navegação ====================
 
     def _show_picker(self):
-        """Abre o seletor criando controles frescos (lazy)."""
+        """Abre o seletor como tela cheia (page.views) — sem AlertDialog aninhado
+        nem troca de content, que falham no Flet 0.24.1."""
         _log("abriu seletor")
 
-        self.picker_contacts = []
-        self.picker_kind = "all"
+        if not self.page_ref.views:
+            # Sem navegação por rotas ativa ainda: cria view raiz
+            base = getattr(self.page_ref, "controls", [])
+            self.page_ref.views.append(ft.View(controls=base))
 
-        # --- Cria controles frescos aqui ---
-        search_field = ft.TextField(
-            label="Buscar por nome ou número...",
-            prefix_icon=ft.icons.SEARCH,
-            on_change=lambda e: self._picker_filter(search_field, contact_list,
-                                                     status_text, kind_buttons),
-            border_radius=10, width=540,
-        )
-        contact_list = ft.Column(spacing=4, height=340)
-        contact_list.scroll = ft.ScrollMode.AUTO
-        status_text = ft.Text("Carregando...", size=12,
-                              color=ft.colors.with_opacity(0.7, ft.colors.WHITE))
-        diag_text = ft.Text("", size=10,
-                            color=ft.colors.with_opacity(0.4, ft.colors.WHITE))
+        def on_pick(contact: dict):
+            _log(f"escolheu: {contact.get('name')} {contact.get('number')}")
+            self.number_field.value = str(contact.get("number", ""))
+            self._reopen_dialog()
 
-        def make_kind_btn(label, kind):
-            def handler(e):
-                self.picker_kind = kind
-                self._picker_filter(search_field, contact_list, status_text, kind_buttons)
-                self._refresh_picker(kind_buttons)
-            return ft.TextButton(label, on_click=handler)
+        def on_back_cb():
+            self._reopen_dialog()
 
-        kind_all = make_kind_btn("Todos", "all")
-        kind_contacts = make_kind_btn("Contatos", "contacts")
-        kind_groups = make_kind_btn("Grupos", "groups")
-        kind_buttons = {"all": kind_all, "contacts": kind_contacts, "groups": kind_groups}
+        # Fecha o diálogo modal antes de empurrar a tela de seleção
+        try:
+            self.page_ref.close(self)
+        except Exception:
+            pass
 
-        def on_own(e):
-            status_text.value = "Detectando seu número..."
-            self._refresh_picker(kind_buttons)
+        picker = ContactPickerView(self.page_ref, on_pick=on_pick, on_back=on_back_cb)
+        self._picker_instance = picker
+        self.page_ref.views.append(picker)
+        self.page_ref.update()
+
+    def _reopen_dialog(self):
+        try:
+            self.page_ref.open(self)
+            self.update()
+        except Exception as ex:
+            _log(f"reopen dialogo erro: {ex}")
             try:
-                owner = get_api().fetch_owner_number()
+                self.page_ref.open(self)
             except Exception:
-                owner = None
-            if not owner:
-                owner = (db.get_settings().get("my_number") or "").strip()
-            if not owner:
-                status_text.value = "Não achei. Configure em Ajustes > Meu número."
-                self._refresh_picker(kind_buttons)
-                return
-            self.number_field.value = owner
-            self._show_form()
-
-        def on_sync(e):
-            threading.Thread(target=self._picker_sync_api,
-                             args=(search_field, contact_list, status_text, diag_text,
-                                   kind_buttons),
-                             daemon=True).start()
-
-        def on_reload(e):
-            self._picker_load_cache(search_field, contact_list, status_text, diag_text,
-                                    kind_buttons)
-
-        def on_back(e):
-            self._show_form()
-
-        self._picker_search = search_field
-        self._picker_list = contact_list
-        self._picker_status = status_text
-        self._picker_diag = diag_text
-        self._picker_kind_buttons = kind_buttons
-
-        # Container verde para a lista
-        list_container = ft.Container(
-            content=contact_list, height=360,
-            border=ft.border.all(2, ft.colors.GREEN_400),
-            border_radius=8, padding=4,
-            bgcolor=ft.colors.with_opacity(0.05, ft.colors.WHITE),
-        )
-
-        self.content = ft.Container(
-            width=560,
-            content=ft.Column([
-                ft.Row([
-                    ft.IconButton(icon=ft.icons.ARROW_BACK, tooltip="Voltar",
-                                  on_click=on_back),
-                    ft.Text("Selecionar destino", size=18,
-                            weight=ft.FontWeight.BOLD),
-                    ft.Container(expand=True),
-                    ft.IconButton(icon=ft.icons.SYNC, tooltip="Sincronizar",
-                                  on_click=on_sync),
-                ]),
-                ft.Row([kind_all, kind_contacts, kind_groups,
-                        ft.Container(expand=True),
-                        ft.OutlinedButton("Você (meu número)",
-                                          icon=ft.icons.PERSON,
-                                          on_click=on_own)],
-                       spacing=4, wrap=True),
-                search_field,
-                list_container,
-                status_text,
-                diag_text,
-                ft.Row([
-                    ft.FilledButton("Recarregar cache", icon=ft.icons.REFRESH,
-                                    on_click=on_reload),
-                    ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
-                                    on_click=on_sync),
-                ], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
-            ], spacing=8, scroll=ft.ScrollMode.AUTO),
-        )
-
-        self._safe_update()
-
-        # Carrega dados do cache
-        self._picker_load_cache(search_field, contact_list, status_text, diag_text,
-                                kind_buttons)
-
-        # Dispara sync da API em background
-        if db.count_contacts() == 0:
-            status_text.value = "Cache vazio — sincronizando da API..."
-            self._refresh_picker(kind_buttons)
-            threading.Thread(target=self._picker_sync_api,
-                             args=(search_field, contact_list, status_text, diag_text,
-                                   kind_buttons),
-                             daemon=True).start()
-        else:
-            threading.Thread(target=self._picker_sync_api,
-                             args=(search_field, contact_list, status_text, diag_text,
-                                   kind_buttons),
-                             daemon=True).start()
+                pass
+        try:
+            self.text_field.focus()
+        except Exception:
+            pass
 
     def _show_form(self):
-        """Volta para o formulário. Recria o content para garantir render."""
-        message = self.message
-        page = self.page_ref
-
-        self.number_field = ft.TextField(
-            label="Número do WhatsApp",
-            hint_text="5511999999999",
-            width=280,
-            value=self.number_field.value,
-        )
-        pick_contact_btn = ft.IconButton(
-            icon=ft.icons.CONTACTS, tooltip="Selecionar contato",
-            icon_color=ft.colors.GREEN_400,
-            on_click=lambda e: self._show_picker(),
-        )
-
-        quick_hours = ft.Row(
-            [ft.TextButton(h, on_click=lambda e, h=h: self._set_hour(h))
-             for h in PRESET_HOURS],
-            wrap=True, spacing=4,
-        )
-
-        self.content = ft.Container(
-            width=560,
-            content=ft.Column([
-                ft.Text("Editar mensagem" if message else "Nova mensagem agendada",
-                        size=18, weight=ft.FontWeight.BOLD),
-                ft.Column([
-                    ft.Row([self.number_field, pick_contact_btn], spacing=6),
-                    ft.Row([self.template_dropdown,
-                            ft.TextButton("Usar",
-                                          on_click=lambda e: self._apply_template())],
-                           spacing=6),
-                    self.text_field,
-                    ft.Row([
-                        ft.OutlinedButton(
-                            "Anexar arquivo", icon=ft.icons.ATTACH_FILE,
-                            on_click=lambda e: self.file_picker.pick_files(
-                                allow_multiple=False)),
-                        ft.IconButton(icon=ft.icons.CLOSE, tooltip="Remover",
-                                      on_click=lambda e: self._clear_file()),
-                    ], spacing=4),
-                    self.file_label,
-                    self.file_preview,
-                    ft.Row([self.date_field, self.time_field]),
-                    quick_hours,
-                    ft.Row([self.tag_dropdown, self.rec_dropdown], spacing=8),
-                    self.rec_end_field,
-                ], tight=True, spacing=12, scroll=ft.ScrollMode.AUTO),
-            ], tight=False, spacing=14),
-        )
         self._safe_update()
         try:
             self.text_field.focus()
@@ -369,126 +471,6 @@ class MessageDialog(ft.AlertDialog):
                 fn()
             except Exception:
                 pass
-
-    def _refresh_picker(self, kind_buttons):
-        """Atualiza visual do seletor (barras, etc)."""
-        self._safe_update()
-
-    # ==================== Seletor de contatos ====================
-
-    def _picker_filter(self, search_field, contact_list, status_text, kind_buttons):
-        try:
-            q = (search_field.value or "").strip().lower()
-            all_contacts = db.list_contacts()
-            self.picker_contacts = db.filter_local(all_contacts, q, self.picker_kind)
-            self._picker_render_rows(contact_list)
-        except Exception as ex:
-            _log(f"filtro erro: {ex}")
-            self.picker_contacts = []
-            self._picker_render_rows(contact_list,
-                                     placeholder=f"Erro ao filtrar: {ex}")
-        self._safe_update()
-
-    def _picker_load_cache(self, search_field, contact_list, status_text, diag_text,
-                           kind_buttons):
-        try:
-            all_contacts = db.list_contacts()
-            self.picker_contacts = db.filter_local(
-                all_contacts, search_field.value or "", self.picker_kind)
-            total = db.count_contacts()
-            groups = db.count_groups()
-            status_text.value = f"{total} salvo(s) • {groups} grupo(s) em cache."
-            diag_text.value = f"DB: {db.DB_PATH}"
-            _log(f"cache: {total} contatos, {groups} grupos, "
-                 f"filtro: {len(self.picker_contacts)}")
-            self._picker_render_rows(contact_list)
-        except Exception as ex:
-            _log(f"cache erro: {ex}")
-            self._picker_render_rows(contact_list, placeholder=f"Erro: {ex}")
-        self._safe_update()
-
-    def _picker_render_rows(self, contact_list, placeholder: str | None = None):
-        rows: list = []
-        for ct in (self.picker_contacts or [])[:300]:
-            try:
-                if not isinstance(ct, dict) or not ct.get("number"):
-                    continue
-                name = (ct.get("name") or "").strip() or str(ct.get("number"))
-                is_group = bool(ct.get("is_group"))
-                badge = "Grupo" if is_group else "Contato"
-                number = str(ct.get("number"))
-                rows.append(ft.Container(
-                    bgcolor=ft.colors.with_opacity(0.15, ft.colors.WHITE),
-                    border=ft.border.all(1, ft.colors.with_opacity(0.3, ft.colors.WHITE)),
-                    border_radius=8, padding=10, ink=True,
-                    on_click=lambda e, c=dict(ct): self._picker_pick(c),
-                    content=ft.Column([
-                        ft.Text(f"{name} • {badge}", weight=ft.FontWeight.BOLD,
-                                size=13, color=ft.colors.WHITE),
-                        ft.Text(number, size=11, color=ft.colors.AMBER_200),
-                    ], tight=True, spacing=2),
-                ))
-            except Exception:
-                continue
-        if not rows:
-            msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
-                                  "contatos e grupos.")
-            rows.append(ft.Container(
-                padding=30,
-                content=ft.Column([
-                    ft.Icon(ft.icons.PEOPLE_OUTLINE, size=36,
-                            color=ft.colors.with_opacity(0.35, ft.colors.WHITE)),
-                    ft.Text(msg, size=12, text_align=ft.TextAlign.CENTER,
-                            color=ft.colors.with_opacity(0.55, ft.colors.WHITE)),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)))
-        contact_list.controls = rows
-
-    def _picker_pick(self, contact: dict):
-        _log(f"escolheu: {contact.get('name')} {contact.get('number')}")
-        self.number_field.value = str(contact.get("number", ""))
-        self._show_form()
-
-    def _picker_sync_api(self, search_field, contact_list, status_text, diag_text,
-                         kind_buttons):
-        status_text.value = "Sincronizando com a Evolution API..."
-        self._safe_update()
-        try:
-            api = get_api()
-            contacts = api.find_contacts() or []
-            chats = api.find_chats() or []
-            groups = api.fetch_groups() or []
-            owner = api.fetch_owner_number()
-            merged: dict = {}
-            for ct in contacts + chats + groups:
-                if not isinstance(ct, dict) or not ct.get("number"):
-                    continue
-                k = ct["number"]
-                if k not in merged or (not merged[k]["name"] and ct.get("name")):
-                    merged[k] = ct
-            if owner and owner not in merged:
-                merged[owner] = {"number": owner, "name": "Você",
-                                 "is_group": False}
-            saved = (db.get_settings().get("my_number") or "").strip()
-            saved = db.normalize_number(saved) if saved else ""
-            if saved and saved not in merged:
-                merged[saved] = {"number": saved, "name": "Meu número",
-                                 "is_group": False}
-            fresh = list(merged.values())
-            if fresh:
-                db.replace_contacts(fresh)
-            all_contacts = db.list_contacts()
-            self.picker_contacts = db.filter_local(
-                all_contacts, search_field.value or "", self.picker_kind)
-            self._picker_render_rows(contact_list)
-            total = len(all_contacts)
-            n_groups = sum(1 for c in all_contacts if c.get("is_group"))
-            status_text.value = f"{total} sincronizados ({n_groups} grupos)"
-            diag_text.value = f"DB: {db.DB_PATH}"
-        except Exception as ex:
-            _log(f"sync erro: {ex}")
-            self._picker_render_rows(contact_list, placeholder=f"Erro na API: {ex}")
-            status_text.value = f"Sem conexão — usando cache ({ex})"
-        self._safe_update()
 
     # ==================== Formulário ====================
 
