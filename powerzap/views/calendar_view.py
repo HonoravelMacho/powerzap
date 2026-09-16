@@ -164,7 +164,8 @@ class MessageDialog(ft.AlertDialog):
                                      color=ft.colors.with_opacity(0.6, ft.colors.WHITE))
         self.diag_text = ft.Text("", size=10,
                                  color=ft.colors.with_opacity(0.45, ft.colors.WHITE))
-        self.contact_list = ft.ListView(height=320, spacing=2, expand=False)
+        # Column com scroll é mais confiável no AlertDialog que ListView aninhado
+        self.contact_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO, height=320)
 
         back_btn = ft.IconButton(
             icon=ft.icons.ARROW_BACK,
@@ -204,9 +205,9 @@ class MessageDialog(ft.AlertDialog):
                     ft.Container(expand=True), self.me_btn],
                    spacing=4, wrap=True),
             self.search_field,
-            ft.Container(content=self.contact_list, height=320,
+            ft.Container(content=self.contact_list, height=330,
                          border=ft.border.all(1, ft.colors.with_opacity(0.15, ft.colors.WHITE)),
-                         border_radius=8, padding=4),
+                         border_radius=8, padding=4, bgcolor=ft.colors.with_opacity(0.02, ft.colors.WHITE)),
             self.picker_status,
             self.diag_text,
             ft.Row([reload_btn, diag_btn], alignment=ft.MainAxisAlignment.CENTER, spacing=8),
