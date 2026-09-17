@@ -66,11 +66,17 @@ class ContactPickerView(ft.Column):
         back_btn = ft.IconButton(
             ft.icons.ARROW_BACK, icon_size=28,
             tooltip="Voltar ao formulário", on_click=lambda e: self._finish(None))
-        header = ft.Row([
-            back_btn,
-            ft.Text("Selecionar destino", size=22, weight=ft.FontWeight.BOLD),
-            ft.Container(expand=True),
-        ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+        # Estrutura PLANA idêntica ao CalendarView (que renderiza):
+        # Column(expand) > [Container fixo, Divider, Row(expand) > ListView(expand)]
+        header = ft.Container(
+            padding=ft.padding.only(left=20, right=20, top=12, bottom=12),
+            content=ft.Row([
+                back_btn,
+                ft.Text("Selecionar destino", size=22, weight=ft.FontWeight.BOLD),
+                ft.Container(expand=True),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+        )
 
         kind_row = ft.Row([
             self.kind_all, self.kind_contacts, self.kind_groups,
@@ -78,6 +84,15 @@ class ContactPickerView(ft.Column):
             ft.OutlinedButton("Você (meu número)", icon=ft.icons.PERSON,
                               on_click=lambda e: self._pick_own()),
         ], spacing=4, wrap=True)
+
+        top_panel = ft.Container(
+            padding=ft.padding.only(left=20, right=20, top=8, bottom=8),
+            content=ft.Column([
+                kind_row,
+                self.search,
+                self.list_info,
+            ], spacing=8, tight=True),
+        )
 
         self.list_box = ft.Container(
             content=ft.Text("Carregando...",
@@ -87,6 +102,12 @@ class ContactPickerView(ft.Column):
             border_radius=10, padding=8,
             bgcolor=ft.colors.SURFACE,
         )
+
+        list_panel = ft.Row([
+            ft.Container(padding=ft.padding.only(left=20, right=20),
+                         content=self.list_box, expand=True),
+        ], spacing=0, expand=True)
+
         bottom = ft.Row([
             ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
                             on_click=lambda e: self._sync()),
@@ -95,22 +116,21 @@ class ContactPickerView(ft.Column):
             ft.Container(expand=True),
         ], spacing=8)
 
+        bottom_panel = ft.Container(
+            padding=ft.padding.all(20),
+            content=ft.Column([
+                self.status,
+                self.diag,
+                bottom,
+            ], spacing=6, tight=True),
+        )
+
         self.controls = [
-            ft.Container(
-                bgcolor=ft.colors.BLACK,
-                padding=20, expand=True,
-                content=ft.Column([
-                    header,
-                    ft.Divider(height=1),
-                    kind_row,
-                    self.search,
-                    self.list_info,
-                    self.list_box,
-                    self.status,
-                    self.diag,
-                    bottom,
-                ], spacing=10, expand=True),
-            )
+            header,
+            ft.Divider(height=1),
+            top_panel,
+            list_panel,
+            bottom_panel,
         ]
 
         self._load_cache()
