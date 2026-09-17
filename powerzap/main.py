@@ -55,6 +55,10 @@ def main(page: ft.Page):
 
     views = {}
 
+    # Expõe referências para a UI (seletor de contatos etc.)
+    page.powerzap_content = content
+    page.powerzap_views = views
+
     def refresh():
         idx = rail.selected_index
         if idx in views and hasattr(views[idx], "reload"):
@@ -125,13 +129,7 @@ def diagnose():
     # Teste de render do seletor (sem UI)
     try:
         from powerzap.views.calendar_view import ContactPickerView
-        class FakePage:
-            views = []
-            overlay = []
-            def update(self): pass
-            def open(self, c): pass
-            def close(self, c): pass
-        picker = ContactPickerView(FakePage(), on_pick=lambda c: None, on_back=lambda: None)
+        picker = ContactPickerView(None, on_pick=lambda c: None, on_back=lambda: None)
         print(f"  Seletor render: {len(picker.picker_contacts)} filtrados | {len(picker.list_col.controls)} controles | status={picker.status.value!r}")
         print("  OK: seletor renderizou sem erro")
     except Exception as ex:

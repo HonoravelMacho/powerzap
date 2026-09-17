@@ -32,12 +32,12 @@ def _log(msg: str):
         pass
 
 
-class ContactPickerView(ft.View):
-    """Tela cheia para escolher contato/grupo. Usa page.views (rota),
-    que renderiza controle dinâmico de forma confiável no Flet 0.24.1."""
+class ContactPickerView(ft.Column):
+    """Tela cheia para escolher contato/grupo. É um Column normal (como o
+    CalendarView), atribuído a container.content — renderização confiável."""
 
     def __init__(self, page_ref, on_pick, on_back):
-        super().__init__(bgcolor=ft.colors.BLACK)
+        super().__init__(expand=True, spacing=0)
         self.page_ref = page_ref
         self.on_pick_cb = on_pick
         self.on_back_cb = on_back
@@ -95,6 +95,7 @@ class ContactPickerView(ft.View):
 
         self.controls = [
             ft.Container(
+                bgcolor=ft.colors.BLACK,
                 padding=20, expand=True,
                 content=ft.Column([
                     header,
@@ -110,23 +111,18 @@ class ContactPickerView(ft.View):
         ]
 
         self._load_cache()
+        # Sincroniza em background para não travar a interface
+        threading.Thread(target=self._safe_sync, daemon=True).start()
+
+    def _safe_sync(self):
         try:
-            if db.count_contacts() == 0:
-                self._sync()
-            else:
-                self._sync()
-        except Exception:
-            pass
+            self._sync()
+        except Exception as ex:
+            _log(f"picker sync thread erro: {ex}")
 
     # ----- navegação -----
 
     def _finish(self, contact):
-        try:
-            if self in self.page_ref.views:
-                self.page_ref.views.remove(self)
-            self.page_ref.update()
-        except Exception:
-            pass
         if contact:
             self.on_pick_cb(contact)
         else:
@@ -415,24 +411,34 @@ class MessageDialog(ft.AlertDialog):
     # ==================== Navegação ====================
 
     def _show_picker(self):
-        """Abre o seletor como tela cheia (page.views) — sem AlertDialog aninhado
-        nem troca de content, que falham no Flet 0.24.1."""
+        """Abre o seletor como tela cheia trocando o content.content do app
+        (mesmo mecanismo do NavigationRail) — sem AlertDialog aninhado e
+        sem page.views, que falham na combinação Flet 0.24.1 + page.add()."""
         _log("abriu seletor")
 
-        if not self.page_ref.views:
-            # Sem navegação por rotas ativa ainda: cria view raiz
-            base = getattr(self.page_ref, "controls", [])
-            self.page_ref.views.append(ft.View(controls=base))
+        anchor = getattr(self.page_ref, "powerzap_content", None)
+        if anchor is None:
+            _log("seletor: sem anchor powerzap_content na página")
+            self.page_ref.open(ft.SnackBar(
+                ft.Text("Seletor indisponível neste contexto.")))
+            return
+
+        original = anchor.content
+
+        def restore():
+            anchor.content = original
+            self.page_ref.update()
+            self._reopen_dialog()
 
         def on_pick(contact: dict):
             _log(f"escolheu: {contact.get('name')} {contact.get('number')}")
             self.number_field.value = str(contact.get("number", ""))
-            self._reopen_dialog()
+            restore()
 
         def on_back_cb():
-            self._reopen_dialog()
+            restore()
 
-        # Fecha o diálogo modal antes de empurrar a tela de seleção
+        # Fecha o diálogo modal antes de trocar a tela
         try:
             self.page_ref.close(self)
         except Exception:
@@ -440,7 +446,7 @@ class MessageDialog(ft.AlertDialog):
 
         picker = ContactPickerView(self.page_ref, on_pick=on_pick, on_back=on_back_cb)
         self._picker_instance = picker
-        self.page_ref.views.append(picker)
+        anchor.content = picker
         self.page_ref.update()
 
     def _reopen_dialog(self):
