@@ -54,9 +54,10 @@ class ContactPickerView(ft.Column):
         self.diag = ft.Text("", size=10,
                             color=ft.colors.with_opacity(0.5, ft.colors.WHITE))
         self.list_col = ft.ListView(
-            spacing=4, padding=6, expand=True,
-            auto_scroll=False,
+            spacing=0, padding=4, expand=True,
         )
+        self.list_info = ft.Text("", size=12,
+                                 color=ft.colors.CYAN_200)
 
         self.kind_all = ft.TextButton(
             "Todos", on_click=lambda e: self._set_kind("all"))
@@ -104,6 +105,7 @@ class ContactPickerView(ft.Column):
                     ft.Divider(height=1),
                     kind_row,
                     self.search,
+                    self.list_info,
                     list_box,
                     self.status,
                     self.diag,
@@ -169,43 +171,60 @@ class ContactPickerView(ft.Column):
 
     def _render(self, placeholder: str | None = None):
         rows: list = []
+        contatos = 0
+        grupos = 0
         for ct in (self.picker_contacts or [])[:300]:
             try:
                 if not isinstance(ct, dict) or not ct.get("number"):
                     continue
                 name = (ct.get("name") or "").strip() or str(ct.get("number"))
                 is_group = bool(ct.get("is_group"))
+                if is_group:
+                    grupos += 1
+                else:
+                    contatos += 1
                 badge = "Grupo" if is_group else "Contato"
                 number = str(ct.get("number"))
-                rows.append(ft.Container(
+                rows.append(ft.ListTile(
                     bgcolor=ft.colors.GREY_800,
-                    border=ft.border.all(1, ft.colors.WHITE24),
-                    border_radius=8, padding=10, ink=True,
+                    shape=ft.RoundedRectangleBorder(
+                        radius=8,
+                        side=ft.BorderSide(1, ft.colors.WHITE24),
+                    ),
+                    dense=True,
                     on_click=lambda e, c=dict(ct): self._finish(c),
-                    content=ft.Column([
-                        ft.Text(f"{name} • {badge}", weight=ft.FontWeight.BOLD,
-                                size=14, color=ft.colors.WHITE,
-                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                        ft.Text(number, size=11, color=ft.colors.AMBER_200),
-                    ], tight=True, spacing=2),
+                    title=ft.Text(f"{name} • {badge}",
+                                  weight=ft.FontWeight.BOLD,
+                                  size=14, color=ft.colors.WHITE,
+                                  max_lines=1,
+                                  overflow=ft.TextOverflow.ELLIPSIS),
+                    subtitle=ft.Text(number, size=11,
+                                     color=ft.colors.AMBER_200,
+                                     max_lines=1),
                 ))
             except Exception:
                 continue
         if not rows:
             msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
                                   "contatos e grupos.")
-            rows.append(ft.Container(
-                padding=40,
-                content=ft.Column([
-                    ft.Icon(ft.icons.PEOPLE_OUTLINE, size=40,
-                            color=ft.colors.WHITE38),
-                    ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
-                            color=ft.colors.WHITE60),
-                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)))
+            rows.append(ft.ListTile(
+                title=ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
+                              color=ft.colors.WHITE60),
+                dense=True,
+            ))
+        self.list_col.controls = rows
+        try:
+            self.list_info.value = (
+                f"Mostrando {len(rows)} de {len(self.picker_contacts or [])} "
+                f"({contatos} contatos • {grupos} grupos) — filtro: {self.picker_kind}")
+        except Exception:
+            pass
+        _log(f"picker render: {len(rows)} itens colocados no ListView")
         self.list_col.controls = rows
 
     def _refresh(self):
         for fn in (lambda: self.list_col.update(),
+                   lambda: self.list_info.update(),
                    lambda: self.status.update(),
                    lambda: self.page_ref.update()):
             try:
