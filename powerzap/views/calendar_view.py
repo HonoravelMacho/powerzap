@@ -49,12 +49,14 @@ class ContactPickerView(ft.Column):
             prefix_icon=ft.icons.SEARCH,
             border_radius=10,
             on_change=lambda e: self._filter(),
-            expand=True,
         )
         self.status = ft.Text("Carregando...", size=12)
         self.diag = ft.Text("", size=10,
                             color=ft.colors.with_opacity(0.5, ft.colors.WHITE))
-        self.list_col = ft.Column(spacing=4, height=480, scroll=ft.ScrollMode.AUTO)
+        self.list_col = ft.ListView(
+            spacing=4, padding=6, expand=True,
+            auto_scroll=False,
+        )
 
         self.kind_all = ft.TextButton(
             "Todos", on_click=lambda e: self._set_kind("all"))
@@ -80,10 +82,10 @@ class ContactPickerView(ft.Column):
         ], spacing=4, wrap=True)
 
         list_box = ft.Container(
-            content=self.list_col, height=480, expand=True,
+            content=self.list_col, expand=True,
             border=ft.border.all(2, ft.colors.GREEN_400),
             border_radius=10, padding=8,
-            bgcolor=ft.colors.with_opacity(0.05, ft.colors.WHITE),
+            bgcolor=ft.colors.SURFACE,
         )
         bottom = ft.Row([
             ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
@@ -106,7 +108,7 @@ class ContactPickerView(ft.Column):
                     self.status,
                     self.diag,
                     bottom,
-                ], spacing=10, scroll=ft.ScrollMode.AUTO),
+                ], spacing=10, expand=True),
             )
         ]
 
@@ -176,13 +178,14 @@ class ContactPickerView(ft.Column):
                 badge = "Grupo" if is_group else "Contato"
                 number = str(ct.get("number"))
                 rows.append(ft.Container(
-                    bgcolor=ft.colors.with_opacity(0.15, ft.colors.WHITE),
-                    border=ft.border.all(1, ft.colors.with_opacity(0.3, ft.colors.WHITE)),
+                    bgcolor=ft.colors.GREY_800,
+                    border=ft.border.all(1, ft.colors.WHITE24),
                     border_radius=8, padding=10, ink=True,
                     on_click=lambda e, c=dict(ct): self._finish(c),
                     content=ft.Column([
                         ft.Text(f"{name} • {badge}", weight=ft.FontWeight.BOLD,
-                                size=14, color=ft.colors.WHITE),
+                                size=14, color=ft.colors.WHITE,
+                                max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
                         ft.Text(number, size=11, color=ft.colors.AMBER_200),
                     ], tight=True, spacing=2),
                 ))
@@ -195,9 +198,9 @@ class ContactPickerView(ft.Column):
                 padding=40,
                 content=ft.Column([
                     ft.Icon(ft.icons.PEOPLE_OUTLINE, size=40,
-                            color=ft.colors.with_opacity(0.4, ft.colors.WHITE)),
+                            color=ft.colors.WHITE38),
                     ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
-                            color=ft.colors.with_opacity(0.6, ft.colors.WHITE)),
+                            color=ft.colors.WHITE60),
                 ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)))
         self.list_col.controls = rows
 
