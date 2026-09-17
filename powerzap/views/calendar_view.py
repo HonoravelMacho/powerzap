@@ -53,9 +53,6 @@ class ContactPickerView(ft.Column):
         self.status = ft.Text("Carregando...", size=12)
         self.diag = ft.Text("", size=10,
                             color=ft.colors.with_opacity(0.5, ft.colors.WHITE))
-        self.list_col = ft.ListView(
-            spacing=0, padding=4, expand=True,
-        )
         self.list_info = ft.Text("", size=12,
                                  color=ft.colors.CYAN_200)
 
@@ -82,8 +79,10 @@ class ContactPickerView(ft.Column):
                               on_click=lambda e: self._pick_own()),
         ], spacing=4, wrap=True)
 
-        list_box = ft.Container(
-            content=self.list_col, expand=True,
+        self.list_box = ft.Container(
+            content=ft.Text("Carregando...",
+                            color=ft.colors.with_opacity(0.6, ft.colors.WHITE)),
+            expand=True,
             border=ft.border.all(2, ft.colors.GREEN_400),
             border_radius=10, padding=8,
             bgcolor=ft.colors.SURFACE,
@@ -106,7 +105,7 @@ class ContactPickerView(ft.Column):
                     kind_row,
                     self.search,
                     self.list_info,
-                    list_box,
+                    self.list_box,
                     self.status,
                     self.diag,
                     bottom,
@@ -170,7 +169,7 @@ class ContactPickerView(ft.Column):
         self._refresh()
 
     def _render(self, placeholder: str | None = None):
-        rows: list = []
+        cards: list = []
         contatos = 0
         grupos = 0
         for ct in (self.picker_contacts or [])[:300]:
@@ -185,43 +184,47 @@ class ContactPickerView(ft.Column):
                     contatos += 1
                 badge = "Grupo" if is_group else "Contato"
                 number = str(ct.get("number"))
-                rows.append(ft.ListTile(
+                cards.append(ft.Container(
+                    margin=ft.margin.only(bottom=4),
+                    padding=10,
+                    border_radius=8,
                     bgcolor=ft.colors.GREY_800,
-                    shape=ft.RoundedRectangleBorder(radius=8),
-                    dense=True,
+                    ink=True,
                     on_click=lambda e, c=dict(ct): self._finish(c),
-                    title=ft.Text(f"{name} • {badge}",
-                                  weight=ft.FontWeight.BOLD,
-                                  size=14, color=ft.colors.WHITE,
-                                  max_lines=1,
-                                  overflow=ft.TextOverflow.ELLIPSIS),
-                    subtitle=ft.Text(number, size=11,
-                                     color=ft.colors.AMBER_200,
-                                     max_lines=1),
+                    content=ft.Column([
+                        ft.Text(f"{name} • {badge}",
+                                weight=ft.FontWeight.BOLD,
+                                size=14, color=ft.colors.WHITE,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS),
+                        ft.Text(number, size=11,
+                                color=ft.colors.AMBER_200, max_lines=1),
+                    ], spacing=2, tight=True),
                 ))
             except Exception as ex:
                 _log(f"picker item erro ({ct.get('number')}): {ex}")
                 continue
-        if not rows:
+        if not cards:
             msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
                                   "contatos e grupos.")
-            rows.append(ft.ListTile(
-                title=ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
-                              color=ft.colors.WHITE60),
-                dense=True,
-            ))
-        self.list_col.controls = rows
+            cards.append(ft.Container(
+                padding=40,
+                content=ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
+                                color=ft.colors.WHITE60)))
+        # Recria um ListView NOVO por render (padrão do painel de detalhes,
+        # que funciona no Flet 0.24.1) — mutar .controls não renderiza.
+        self.list_box.content = ft.ListView(
+            cards, spacing=0, padding=4, expand=True)
         try:
             self.list_info.value = (
-                f"Mostrando {len(rows)} de {len(self.picker_contacts or [])} "
+                f"Mostrando {len(cards)} de {len(self.picker_contacts or [])} "
                 f"({contatos} contatos • {grupos} grupos) — filtro: {self.picker_kind}")
         except Exception:
             pass
-        _log(f"picker render: {len(rows)} itens colocados no ListView")
-        self.list_col.controls = rows
+        _log(f"picker render: {len(cards)} cartões -> ListView novo")
 
     def _refresh(self):
-        for fn in (lambda: self.list_col.update(),
+        for fn in (lambda: self.list_box.update(),
                    lambda: self.list_info.update(),
                    lambda: self.status.update(),
                    lambda: self.page_ref.update()):

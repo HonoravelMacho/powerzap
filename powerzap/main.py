@@ -130,7 +130,10 @@ def diagnose():
     try:
         from powerzap.views.calendar_view import ContactPickerView
         picker = ContactPickerView(None, on_pick=lambda c: None, on_back=lambda: None)
-        print(f"  Seletor render: {len(picker.picker_contacts)} filtrados | {len(picker.list_col.controls)} controles | status={picker.status.value!r}")
+        lv = picker.list_box.content
+        print(f"  Seletor render: {len(picker.picker_contacts)} filtrados | "
+              f"list_view={type(lv).__name__} com {len(lv.controls)} controles | "
+              f"status={picker.status.value!r}")
         print("  OK: seletor renderizou sem erro")
     except Exception as ex:
         import traceback
