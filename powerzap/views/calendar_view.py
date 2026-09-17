@@ -187,10 +187,7 @@ class ContactPickerView(ft.Column):
                 number = str(ct.get("number"))
                 rows.append(ft.ListTile(
                     bgcolor=ft.colors.GREY_800,
-                    shape=ft.RoundedRectangleBorder(
-                        radius=8,
-                        side=ft.BorderSide(1, ft.colors.WHITE24),
-                    ),
+                    shape=ft.RoundedRectangleBorder(radius=8),
                     dense=True,
                     on_click=lambda e, c=dict(ct): self._finish(c),
                     title=ft.Text(f"{name} • {badge}",
@@ -202,7 +199,8 @@ class ContactPickerView(ft.Column):
                                      color=ft.colors.AMBER_200,
                                      max_lines=1),
                 ))
-            except Exception:
+            except Exception as ex:
+                _log(f"picker item erro ({ct.get('number')}): {ex}")
                 continue
         if not rows:
             msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
