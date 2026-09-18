@@ -79,7 +79,10 @@ class ContactPickerView(ft.Column):
         )
 
         kind_row = ft.Row([
-            self.kind_all, self.kind_contacts, self.kind_groups,
+            ft.Text("Contatos e grupos juntos, em ordem alfabética. "
+                    "Digite para filtrar.",
+                    size=12,
+                    color=ft.colors.with_opacity(0.7, ft.colors.WHITE)),
             ft.Container(expand=True),
             ft.OutlinedButton("Você (meu número)", icon=ft.icons.PERSON,
                               on_click=lambda e: self._pick_own()),
@@ -94,19 +97,21 @@ class ContactPickerView(ft.Column):
             ], spacing=8, tight=True),
         )
 
+        # Altura FIXA: dentro de Row/Column com expand o ListView colapsa
+        # na versão Flet 0.24.1. Altura determinística garante renderização.
         self.list_box = ft.Container(
             content=ft.Text("Carregando...",
                             color=ft.colors.with_opacity(0.6, ft.colors.WHITE)),
-            expand=True,
+            height=380,
             border=ft.border.all(2, ft.colors.GREEN_400),
             border_radius=10, padding=8,
             bgcolor=ft.colors.SURFACE,
         )
 
-        list_panel = ft.Row([
-            ft.Container(padding=ft.padding.only(left=20, right=20),
-                         content=self.list_box, expand=True),
-        ], spacing=0, expand=True)
+        list_panel = ft.Container(
+            padding=ft.padding.only(left=20, right=20),
+            content=self.list_box,
+        )
 
         bottom = ft.Row([
             ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
@@ -161,7 +166,9 @@ class ContactPickerView(ft.Column):
         try:
             all_contacts = db.list_contacts()
             self.picker_contacts = db.filter_local(
-                all_contacts, self.search.value or "", self.picker_kind)
+                all_contacts, self.search.value or "", "all")
+            self.picker_contacts.sort(
+                key=lambda c: (c.get("name") or c.get("number") or "").lower())
             total = db.count_contacts()
             groups = db.count_groups()
             self.status.value = f"{total} salvo(s) • {groups} grupo(s) em cache."
@@ -179,8 +186,11 @@ class ContactPickerView(ft.Column):
         try:
             q = (self.search.value or "").strip().lower()
             all_contacts = db.list_contacts()
-            self.picker_contacts = db.filter_local(all_contacts, q, self.picker_kind)
-            _log(f"picker filtro: {self.picker_kind} q={q[:20]!r} -> "
+            self.picker_contacts = db.filter_local(all_contacts, q, "all")
+            # Lista única em ordem alfabética (grupos e contatos juntos)
+            self.picker_contacts.sort(
+                key=lambda c: (c.get("name") or c.get("number") or "").lower())
+            _log(f"picker filtro: q={q[:20]!r} -> "
                  f"{len(self.picker_contacts)}")
             self._render()
         except Exception as ex:
@@ -238,7 +248,7 @@ class ContactPickerView(ft.Column):
         try:
             self.list_info.value = (
                 f"Mostrando {len(cards)} de {len(self.picker_contacts or [])} "
-                f"({contatos} contatos • {grupos} grupos) — filtro: {self.picker_kind}")
+                f"({contatos} contatos • {grupos} grupos, A-Z)")
         except Exception:
             pass
         _log(f"picker render: {len(cards)} cartões -> ListView novo")
@@ -491,6 +501,18 @@ class MessageDialog(ft.AlertDialog):
         self._picker_instance = picker
         anchor.content = picker
         self.page_ref.update()
+        # Reconstrói a lista DEPOIS do attach: no Flet 0.24.1 um ListView
+        # montado antes de entrar na árvore não envia seus itens.
+        def _rebuild_apos_attach():
+            try:
+                picker._load_cache()
+                self.page_ref.update()
+            except Exception as ex:
+                _log(f"picker rebuild pos-attach erro: {ex}")
+        try:
+            self.page_ref.run_thread(_rebuild_apos_attach)
+        except Exception:
+            _rebuild_apos_attach()
 
     def _reopen_dialog(self):
         try:
