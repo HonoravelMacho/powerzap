@@ -139,14 +139,22 @@ class ContactPickerView(ft.Column):
         ]
 
         self._load_cache()
-        # Sincroniza em background para não travar a interface
-        threading.Thread(target=self._safe_sync, daemon=True).start()
+        # Sincroniza DEPOIS de anexado, via thread da UI (Flet 0.24.1
+        # exige page.update() apenas na thread principal).
+        threading.Timer(
+            3.0,
+            lambda: self._safe_call(self.page_ref, self._sync),
+        ).start()
 
-    def _safe_sync(self):
+    def _safe_call(self, page, fn):
+        """Roda fn na thread da UI via run_thread; cai direto se falhar."""
         try:
-            self._sync()
-        except Exception as ex:
-            _log(f"picker sync thread erro: {ex}")
+            page.run_thread(fn)
+        except Exception:
+            try:
+                fn()
+            except Exception as ex:
+                _log(f"picker _safe_call erro: {ex}")
 
     # ----- navegação -----
 
