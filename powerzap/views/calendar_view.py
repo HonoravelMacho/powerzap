@@ -32,17 +32,28 @@ def _log(msg: str):
         pass
 
 
-class ContactPickerView(ft.Column):
-    """Tela cheia para escolher contato/grupo. É um Column normal (como o
-    CalendarView), atribuído a container.content — renderização confiável."""
+class ContactPickerView(ft.AlertDialog):
+    """Seletor de destino como AlertDialog (superfície que renderiza).
+
+    Motivo da troca: o picker antigo era um ft.Column trocado via
+    content.content + ft.ListView montado antes do attach — em 10 versões
+    a lista nunca apareceu (área vazia, sem erro). Este diálogo usa só
+    controles simples (Dropdown + Column com scroll + botões) dentro do
+    AlertDialog, que é a superfície garantida do app. Nenhum update() é
+    feito durante o __init__; tudo é montado antes do page.open().
+    """
+
+    MAX_DROPDOWN = 150
+    MAX_BUTTONS = 80
 
     def __init__(self, page_ref, on_pick, on_back):
-        super().__init__(expand=True, spacing=0)
+        super().__init__(modal=True)
         self.page_ref = page_ref
         self.on_pick_cb = on_pick
         self.on_back_cb = on_back
-        self.picker_contacts: list = []
         self.picker_kind = "all"
+        self.picker_contacts: list = []
+        self._by_key: dict = {}
 
         self.search = ft.TextField(
             label="Buscar por nome ou número...",
@@ -51,118 +62,91 @@ class ContactPickerView(ft.Column):
             on_change=lambda e: self._filter(),
         )
         self.status = ft.Text("Carregando...", size=12)
-        self.diag = ft.Text("", size=10,
-                            color=ft.colors.with_opacity(0.5, ft.colors.WHITE))
-        self.list_info = ft.Text("", size=12,
-                                 color=ft.colors.CYAN_200)
+        self.list_info = ft.Text("", size=12, color=ft.colors.CYAN_200)
 
-        self.kind_all = ft.TextButton(
-            "Todos", on_click=lambda e: self._set_kind("all"))
-        self.kind_contacts = ft.TextButton(
-            "Contatos", on_click=lambda e: self._set_kind("contacts"))
-        self.kind_groups = ft.TextButton(
-            "Grupos", on_click=lambda e: self._set_kind("groups"))
-
-        back_btn = ft.IconButton(
-            ft.icons.ARROW_BACK, icon_size=28,
-            tooltip="Voltar ao formulário", on_click=lambda e: self._finish(None))
-
-        # Estrutura PLANA idêntica ao CalendarView (que renderiza):
-        # Column(expand) > [Container fixo, Divider, Row(expand) > ListView(expand)]
-        header = ft.Container(
-            padding=ft.padding.only(left=20, right=20, top=12, bottom=12),
-            content=ft.Row([
-                back_btn,
-                ft.Text("Selecionar destino", size=22, weight=ft.FontWeight.BOLD),
-                ft.Container(expand=True),
-            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        )
-
-        kind_row = ft.Row([
-            ft.Text("Contatos e grupos juntos, em ordem alfabética. "
-                    "Digite para filtrar.",
-                    size=12,
-                    color=ft.colors.with_opacity(0.7, ft.colors.WHITE)),
-            ft.Container(expand=True),
-            ft.OutlinedButton("Você (meu número)", icon=ft.icons.PERSON,
-                              on_click=lambda e: self._pick_own()),
+        self.kind_row = ft.Row([
+            ft.TextButton("Todos",
+                          on_click=lambda e: self._set_kind("all")),
+            ft.TextButton("Contatos",
+                          on_click=lambda e: self._set_kind("contacts")),
+            ft.TextButton("Grupos",
+                          on_click=lambda e: self._set_kind("groups")),
         ], spacing=4, wrap=True)
 
-        top_panel = ft.Container(
-            padding=ft.padding.only(left=20, right=20, top=8, bottom=8),
-            content=ft.Column([
-                kind_row,
-                self.search,
-                self.list_info,
-            ], spacing=8, tight=True),
+        self.dest_dropdown = ft.Dropdown(
+            label="Escolha contato ou grupo",
+            width=520,
+            options=[],
+        )
+        use_btn = ft.FilledButton(
+            "Usar selecionado", icon=ft.icons.CHECK,
+            on_click=lambda e: self._use_dropdown(),
+        )
+        own_btn = ft.OutlinedButton(
+            "Você (meu número)", icon=ft.icons.PERSON,
+            on_click=lambda e: self._pick_own(),
         )
 
-        # Altura FIXA: dentro de Row/Column com expand o ListView colapsa
-        # na versão Flet 0.24.1. Altura determinística garante renderização.
-        self.list_box = ft.Container(
-            content=ft.Text("Carregando...",
-                            color=ft.colors.with_opacity(0.6, ft.colors.WHITE)),
-            height=380,
+        # Lista simples com Column + scroll (sem ListView: o ListView
+        # montado antes do attach nunca enviava os itens no Flet 0.24.1).
+        self.results = ft.Column(
+            spacing=2, tight=True, scroll=ft.ScrollMode.AUTO, height=280,
+        )
+        results_box = ft.Container(
+            content=self.results,
+            height=280,
             border=ft.border.all(2, ft.colors.GREEN_400),
             border_radius=10, padding=8,
             bgcolor=ft.colors.SURFACE,
+            width=520,
         )
 
-        list_panel = ft.Container(
-            padding=ft.padding.only(left=20, right=20),
-            content=self.list_box,
-        )
-
-        bottom = ft.Row([
-            ft.FilledButton("Sincronizar API", icon=ft.icons.SYNC,
-                            on_click=lambda e: self._sync()),
-            ft.FilledButton("Recarregar cache", icon=ft.icons.REFRESH,
-                            on_click=lambda e: self._load_cache()),
-            ft.Container(expand=True),
-        ], spacing=8)
-
-        bottom_panel = ft.Container(
-            padding=ft.padding.all(20),
+        self.content = ft.Container(
+            width=560,
             content=ft.Column([
+                ft.Text("Selecionar destino", size=18,
+                        weight=ft.FontWeight.BOLD),
+                ft.Text("Contatos e grupos juntos, em ordem alfabética. "
+                        "Digite para filtrar ou escolha na lista.",
+                        size=12,
+                        color=ft.colors.with_opacity(0.7, ft.colors.WHITE)),
+                self.kind_row,
+                self.search,
+                self.dest_dropdown,
+                ft.Row([use_btn, own_btn], spacing=8, wrap=True),
+                self.list_info,
+                results_box,
                 self.status,
-                self.diag,
-                bottom,
-            ], spacing=6, tight=True),
+            ], tight=True, spacing=10, scroll=ft.ScrollMode.AUTO),
         )
-
-        self.controls = [
-            header,
-            ft.Divider(height=1),
-            top_panel,
-            list_panel,
-            bottom_panel,
+        self.actions = [
+            ft.TextButton("Sincronizar API", icon=ft.icons.SYNC,
+                          on_click=lambda e: self._sync_start()),
+            ft.TextButton("Voltar", on_click=lambda e: self._finish(None)),
         ]
 
+        # Monta tudo de forma síncrona, SEM nenhum update() aqui dentro.
+        # O chamador faz page.open() depois — um único attach.
         self._load_cache()
-        # Sincroniza DEPOIS de anexado, via thread da UI (Flet 0.24.1
-        # exige page.update() apenas na thread principal).
-        threading.Timer(
-            3.0,
-            lambda: self._safe_call(self.page_ref, self._sync),
-        ).start()
-
-    def _safe_call(self, page, fn):
-        """Roda fn na thread da UI via run_thread; cai direto se falhar."""
-        try:
-            page.run_thread(fn)
-        except Exception:
-            try:
-                fn()
-            except Exception as ex:
-                _log(f"picker _safe_call erro: {ex}")
 
     # ----- navegação -----
 
     def _finish(self, contact):
-        if contact:
-            self.on_pick_cb(contact)
-        else:
-            self.on_back_cb()
+        try:
+            if contact:
+                self.on_pick_cb(contact)
+            else:
+                self.on_back_cb()
+        except Exception as ex:
+            _log(f"picker finish erro: {ex}")
+
+    def _safe_update(self):
+        for fn in (lambda: self.update(),
+                   lambda: self.page_ref.update()):
+            try:
+                fn()
+            except Exception:
+                pass
 
     # ----- dados -----
 
@@ -180,100 +164,111 @@ class ContactPickerView(ft.Column):
             total = db.count_contacts()
             groups = db.count_groups()
             self.status.value = f"{total} salvo(s) • {groups} grupo(s) em cache."
-            self.diag.value = f"DB: {db.DB_PATH}"
             _log(f"picker: cache {total} grupos {groups} "
                  f"filtro {len(self.picker_contacts)}")
-            self._render()
         except Exception as ex:
             _log(f"picker cache erro: {ex}")
             self.status.value = f"Erro ao ler cache: {ex}"
-            self._render(placeholder="Cache indisponível")
-        self._refresh()
+            self.picker_contacts = []
+        self._rebuild_controls()
 
     def _filter(self):
         try:
             q = (self.search.value or "").strip().lower()
             all_contacts = db.list_contacts()
-            self.picker_contacts = db.filter_local(all_contacts, q, "all")
-            # Lista única em ordem alfabética (grupos e contatos juntos)
+            kind = self.picker_kind or "all"
+            self.picker_contacts = db.filter_local(all_contacts, q, kind)
             self.picker_contacts.sort(
                 key=lambda c: (c.get("name") or c.get("number") or "").lower())
-            _log(f"picker filtro: q={q[:20]!r} -> "
+            _log(f"picker filtro: q={q[:20]!r} kind={kind} -> "
                  f"{len(self.picker_contacts)}")
-            self._render()
         except Exception as ex:
             _log(f"picker filtro erro: {ex}")
-            self._render(placeholder=f"Erro: {ex}")
-        self._refresh()
+        self._rebuild_controls()
+        self._safe_update()
 
-    def _render(self, placeholder: str | None = None):
-        cards: list = []
+    def _label(self, ct: dict) -> str:
+        name = (ct.get("name") or "").strip() or str(ct.get("number"))
+        badge = "Grupo" if ct.get("is_group") else "Contato"
+        short = str(ct.get("number") or "")
+        if len(short) > 34:
+            short = short[:31] + "..."
+        full = f"{name} • {badge} • {short}"
+        return full if len(full) <= 72 else full[:69] + "..."
+
+    def _rebuild_controls(self):
+        """Remonta Dropdown + botões. Não chama update() aqui."""
+        self._by_key = {}
+        options: list = []
+        buttons: list = []
         contatos = 0
         grupos = 0
-        for ct in (self.picker_contacts or [])[:300]:
+        for ct in (self.picker_contacts or [])[:self.MAX_DROPDOWN]:
             try:
                 if not isinstance(ct, dict) or not ct.get("number"):
                     continue
-                name = (ct.get("name") or "").strip() or str(ct.get("number"))
-                is_group = bool(ct.get("is_group"))
-                if is_group:
+                number = str(ct.get("number"))
+                if number in self._by_key:
+                    continue
+                self._by_key[number] = dict(ct)
+                if ct.get("is_group"):
                     grupos += 1
                 else:
                     contatos += 1
-                badge = "Grupo" if is_group else "Contato"
-                number = str(ct.get("number"))
-                cards.append(ft.Container(
-                    margin=ft.margin.only(bottom=4),
-                    padding=10,
-                    border_radius=8,
-                    bgcolor=ft.colors.GREY_800,
-                    ink=True,
-                    on_click=lambda e, c=dict(ct): self._finish(c),
-                    content=ft.Column([
-                        ft.Text(f"{name} • {badge}",
-                                weight=ft.FontWeight.BOLD,
-                                size=14, color=ft.colors.WHITE,
-                                max_lines=1,
-                                overflow=ft.TextOverflow.ELLIPSIS),
-                        ft.Text(number, size=11,
-                                color=ft.colors.AMBER_200, max_lines=1),
-                    ], spacing=2, tight=True),
-                ))
+                options.append(ft.dropdown.Option(
+                    key=number, text=self._label(ct)))
             except Exception as ex:
-                _log(f"picker item erro ({ct.get('number')}): {ex}")
+                _log(f"picker item erro: {ex}")
                 continue
-        if not cards:
-            msg = placeholder or ("Nada aqui. Toque Sincronizar API para buscar "
-                                  "contatos e grupos.")
-            cards.append(ft.Container(
-                padding=40,
-                content=ft.Text(msg, size=13, text_align=ft.TextAlign.CENTER,
-                                color=ft.colors.WHITE60)))
-        # Recria um ListView NOVO por render (padrão do painel de detalhes,
-        # que funciona no Flet 0.24.1) — mutar .controls não renderiza.
-        self.list_box.content = ft.ListView(
-            cards, spacing=0, padding=4, expand=True)
+        self.dest_dropdown.options = options
+        if options:
+            self.dest_dropdown.value = options[0].key
+        else:
+            self.dest_dropdown.value = None
+        for ct in (self.picker_contacts or [])[:self.MAX_BUTTONS]:
+            try:
+                if not isinstance(ct, dict) or not ct.get("number"):
+                    continue
+                number = str(ct.get("number"))
+                name = (ct.get("name") or "").strip() or number
+                badge = "Grupo" if ct.get("is_group") else "Contato"
+                buttons.append(ft.TextButton(
+                    f"{name} • {badge}",
+                    on_click=lambda e, c=dict(ct): self._finish(c),
+                ))
+            except Exception:
+                continue
+        if not buttons:
+            buttons.append(ft.Text(
+                "Nada aqui. Toque Sincronizar API para buscar.",
+                size=13, color=ft.colors.WHITE60))
+        self.results.controls = buttons
         try:
             self.list_info.value = (
-                f"Mostrando {len(cards)} de {len(self.picker_contacts or [])} "
+                f"Mostrando {len(buttons)} de {len(self.picker_contacts or [])} "
                 f"({contatos} contatos • {grupos} grupos, A-Z)")
         except Exception:
             pass
-        _log(f"picker render: {len(cards)} cartões -> ListView novo")
+        _log(f"picker render: {len(buttons)} botoes, {len(options)} options")
 
-    def _refresh(self):
-        for fn in (lambda: self.list_box.update(),
-                   lambda: self.list_info.update(),
-                   lambda: self.status.update(),
-                   lambda: self.page_ref.update()):
-            try:
-                fn()
-            except Exception:
-                pass
+    def _use_dropdown(self):
+        key = self.dest_dropdown.value
+        if not key:
+            self._safe_update()
+            return
+        contact = self._by_key.get(str(key))
+        if contact:
+            self._finish(dict(contact))
+            return
+        # Cai aqui se o contato saiu do cache entre filtro e clique.
+        for ct in self.picker_contacts or []:
+            if str(ct.get("number")) == str(key):
+                self._finish(dict(ct))
+                return
 
     def _pick_own(self):
         self.status.value = "Detectando seu número..."
-        self._refresh()
+        self._safe_update()
         try:
             owner = get_api().fetch_owner_number()
         except Exception:
@@ -282,13 +277,16 @@ class ContactPickerView(ft.Column):
             owner = (db.get_settings().get("my_number") or "").strip()
         if not owner:
             self.status.value = "Não achei. Configure em Ajustes > Meu número."
-            self._refresh()
+            self._safe_update()
             return
         self._finish({"number": owner, "name": "Você", "is_group": False})
 
-    def _sync(self):
+    def _sync_start(self):
         self.status.value = "Sincronizando com a Evolution API..."
-        self._refresh()
+        self._safe_update()
+        threading.Thread(target=self._sync_task, daemon=True).start()
+
+    def _sync_task(self):
         try:
             api = get_api()
             contacts = api.find_contacts() or []
@@ -313,17 +311,42 @@ class ContactPickerView(ft.Column):
             fresh = list(merged.values())
             if fresh:
                 db.replace_contacts(fresh)
-            self.picker_contacts = db.filter_local(
-                db.list_contacts(), self.search.value or "", self.picker_kind)
-            self._render()
-            n_groups = sum(1 for c in db.list_contacts() if c.get("is_group"))
-            self.status.value = (
-                f"{db.count_contacts()} sincronizados ({n_groups} grupos)")
+            msg = (f"{db.count_contacts()} sincronizados "
+                   f"({db.count_groups()} grupos)")
         except Exception as ex:
             _log(f"picker sync erro: {ex}")
-            self._render(placeholder=f"Erro na API: {ex}")
-            self.status.value = f"Sem conexão — usando cache ({ex})"
-        self._refresh()
+            msg = f"Sem conexão — usando cache ({ex})"
+
+        def _apply():
+            try:
+                self._load_cache()
+                self.status.value = msg
+            except Exception as ex:
+                _log(f"picker sync apply erro: {ex}")
+            self._safe_update()
+
+        try:
+            self.page_ref.run_thread(_apply)
+        except Exception:
+            _apply()
+
+    # Compatibilidade com o diagnóstico antigo e testes headless.
+    @property
+    def list_box(self):
+        class _Box:
+            def __init__(self, outer):
+                self._outer = outer
+
+            @property
+            def content(self):
+                class _LV:
+                    def __init__(self, controls):
+                        self.controls = controls
+                return _LV(list(self._outer.results.controls))
+
+            def update(self):
+                pass
+        return _Box(self)
 
 
 class MessageDialog(ft.AlertDialog):
@@ -472,55 +495,40 @@ class MessageDialog(ft.AlertDialog):
     # ==================== Navegação ====================
 
     def _show_picker(self):
-        """Abre o seletor como tela cheia trocando o content.content do app
-        (mesmo mecanismo do NavigationRail) — sem AlertDialog aninhado e
-        sem page.views, que falham na combinação Flet 0.24.1 + page.add()."""
+        """Abre o seletor como AlertDialog (fecha o formulário e reabre ao
+        escolher/voltar). Evita o swap de content.content + ListView, que
+        nunca renderizou no Flet 0.24.1."""
         _log("abriu seletor")
-
-        anchor = getattr(self.page_ref, "powerzap_content", None)
-        if anchor is None:
-            _log("seletor: sem anchor powerzap_content na página")
-            self.page_ref.open(ft.SnackBar(
-                ft.Text("Seletor indisponível neste contexto.")))
-            return
-
-        original = anchor.content
-
-        def restore():
-            anchor.content = original
-            self.page_ref.update()
-            self._reopen_dialog()
 
         def on_pick(contact: dict):
             _log(f"escolheu: {contact.get('name')} {contact.get('number')}")
             self.number_field.value = str(contact.get("number", ""))
-            restore()
+            try:
+                self.page_ref.close(picker)
+            except Exception:
+                pass
+            self._reopen_dialog()
 
         def on_back_cb():
-            restore()
+            try:
+                self.page_ref.close(picker)
+            except Exception:
+                pass
+            self._reopen_dialog()
 
-        # Fecha o diálogo modal antes de trocar a tela
         try:
             self.page_ref.close(self)
         except Exception:
             pass
 
-        picker = ContactPickerView(self.page_ref, on_pick=on_pick, on_back=on_back_cb)
+        picker = ContactPickerView(
+            self.page_ref, on_pick=on_pick, on_back=on_back_cb)
         self._picker_instance = picker
-        anchor.content = picker
-        self.page_ref.update()
-        # Reconstrói a lista DEPOIS do attach: no Flet 0.24.1 um ListView
-        # montado antes de entrar na árvore não envia seus itens.
-        def _rebuild_apos_attach():
-            try:
-                picker._load_cache()
-                self.page_ref.update()
-            except Exception as ex:
-                _log(f"picker rebuild pos-attach erro: {ex}")
         try:
-            self.page_ref.run_thread(_rebuild_apos_attach)
-        except Exception:
-            _rebuild_apos_attach()
+            self.page_ref.open(picker)
+        except Exception as ex:
+            _log(f"seletor open erro: {ex}")
+            self._reopen_dialog()
 
     def _reopen_dialog(self):
         try:
