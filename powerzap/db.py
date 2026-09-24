@@ -229,11 +229,15 @@ def update_message(msg_id: int, number: str, text: str, scheduled_at: str, tag_i
                    caption: str | None = None, mimetype: str | None = None,
                    recurrence: str = "none", recurrence_end: str | None = None):
     number = normalize_number(number)
+    # Ao editar, a mensagem volta para 'pendente' (limpa erro/envio anterior),
+    # senão uma mensagem 'falhou' ou 'enviada' editada nunca seria entregue,
+    # pois o scheduler só busca status='pendente'.
     with conn() as c:
         c.execute(
             "UPDATE messages SET number=?, text=?, scheduled_at=?, tag_id=?, "
             "media_path=?, media_type=?, caption=?, mimetype=?, "
-            "recurrence=?, recurrence_end=? WHERE id=?",
+            "recurrence=?, recurrence_end=?, status='pendente', "
+            "sent_at=NULL, error=NULL WHERE id=?",
             (number, text or "", scheduled_at, tag_id,
              media_path, media_type, caption, mimetype,
              recurrence or "none", recurrence_end, msg_id),
