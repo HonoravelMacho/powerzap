@@ -202,15 +202,39 @@ class ConnectView(ft.Column):
         threading.Thread(target=self._set_status, daemon=True).start()
 
     def restart_connection(self, e=None):
-        """Para instância travada em 'connecting': apaga, recria e gera QR novo."""
+        """Recupera sessão travada em 2 etapas.
+
+        1) Reinício leve (restart): mantém o pareamento, só reconecta o
+           socket. Resolve a maioria dos casos de 'Connection Closed'.
+        2) Se não recuperar, apaga, recria e gera QR novo (exige escanear).
+        """
         self.status_row.controls = [ft.ProgressRing(20)]
         self._safe_update()
 
         def task():
+            api = get_api()
+            # 1) Reinício leve.
             try:
-                api = get_api()
                 self.status_row.controls = [
-                    ft.Text("Apagando sessão travada...", size=13)]
+                    ft.Text("Reiniciando sessão do WhatsApp...", size=13)]
+                self._safe_update()
+                api.restart_instance()
+                for _ in range(15):
+                    time.sleep(4)
+                    try:
+                        if api.is_connected():
+                            self.qr_image.visible = False
+                            self._set_status()
+                            return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # 2) Recriação completa + QR novo.
+            try:
+                self.status_row.controls = [
+                    ft.Text("Sessão não recuperou. Apagando e gerando QR novo...",
+                            size=13)]
                 self._safe_update()
                 for fn in (api.logout, api.delete_instance):
                     try:
@@ -230,12 +254,30 @@ class ConnectView(ft.Column):
         threading.Thread(target=task, daemon=True).start()
 
     def logout(self, e=None):
-        try:
-            get_api().logout()
-            self.qr_image.visible = False
-            self.status_row.controls = [ft.Text("Instância desconectada.")]
-        except EvolutionError as ex:
-            self.status_row.controls = [ft.Text(str(ex), size=13)]
-        except Exception as ex:
-            self.status_row.controls = [ft.Text(f"Erro: {ex}", size=13)]
+        # Roda em thread para não congelar a tela; tolera sessão já caída
+        # (a API retorna 500 'Connection Closed' quando o socket travou).
+        self.status_row.controls = [ft.ProgressRing(20)]
         self._safe_update()
+
+        def task():
+            try:
+                try:
+                    get_api().logout()
+                except EvolutionError as ex:
+                    msg = str(ex).lower()
+                    if "closed" not in msg and "close" not in msg and "404" not in msg:
+                        raise
+                time.sleep(2)
+            except EvolutionError as ex:
+                self.status_row.controls = [
+                    ft.Text(f"Não desconectou: {ex}", size=13)]
+                self._safe_update()
+                return
+            except Exception as ex:
+                self.status_row.controls = [ft.Text(f"Erro: {ex}", size=13)]
+                self._safe_update()
+                return
+            self.qr_image.visible = False
+            self._set_status()
+
+        threading.Thread(target=task, daemon=True).start()
