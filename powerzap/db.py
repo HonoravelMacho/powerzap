@@ -349,6 +349,27 @@ def create_template(title: str, body: str):
         c.execute("INSERT INTO templates(title, body) VALUES(?, ?)", (title, body))
 
 
+def get_template(template_id: int):
+    with conn() as c:
+        row = c.execute(
+            "SELECT * FROM templates WHERE id=?", (template_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_template(template_id: int, title: str, body: str):
+    with conn() as c:
+        c.execute(
+            "UPDATE templates SET title=?, body=? WHERE id=?",
+            (title, body, template_id),
+        )
+
+
+def delete_template(template_id: int):
+    with conn() as c:
+        c.execute("DELETE FROM templates WHERE id=?", (template_id,))
+
+
 # ---------------- Contatos ----------------
 
 def replace_contacts(contacts: list):

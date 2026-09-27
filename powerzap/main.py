@@ -8,6 +8,7 @@ crashlog.install()
 from powerzap import db
 from powerzap.views.calendar_view import CalendarView
 from powerzap.views.tags_view import TagsView
+from powerzap.views.quick_view import QuickView
 from powerzap.views.connect_view import ConnectView
 from powerzap.views.settings_view import SettingsView
 
@@ -42,10 +43,14 @@ def main(page: ft.Page):
     settings_btn = ft.NavigationRailDestination(
         icon=ft.icons.SETTINGS_OUTLINED, selected_icon=ft.icons.SETTINGS, label="Ajustes"
     )
+    quick_btn = ft.NavigationRailDestination(
+        icon=ft.icons.FLASH_ON_OUTLINED, selected_icon=ft.icons.FLASH_ON,
+        label="Rápidas",
+    )
 
     rail = ft.NavigationRail(
         selected_index=0,
-        destinations=[calendar_btn, connect_btn, tags_btn, settings_btn],
+        destinations=[calendar_btn, connect_btn, tags_btn, settings_btn, quick_btn],
         on_change=lambda e: switch(e.control.selected_index),
         label_type=ft.NavigationRailLabelType.ALL,
         min_width=90,
@@ -72,8 +77,10 @@ def main(page: ft.Page):
             views.setdefault(1, ConnectView(page))
         elif idx == 2:
             views[2] = TagsView(on_change=refresh)
-        else:
+        elif idx == 3:
             views.setdefault(3, SettingsView(page))
+        else:
+            views.setdefault(4, QuickView(on_change=refresh))
         content.content = views[idx]
         content.update()
         view_obj = views[idx]

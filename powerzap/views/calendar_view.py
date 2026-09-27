@@ -19,7 +19,7 @@ STATUS_COLORS = {
     "falhou": ft.colors.RED_400,
 }
 
-PRESET_HOURS = ["08:00", "09:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]
+PRESET_HOURS = ["05:00", "08:00", "09:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00"]
 
 WEEKDAYS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
@@ -405,6 +405,20 @@ class MessageDialog(ft.AlertDialog):
             ],
             value=str(message["tag_id"]) if message and message["tag_id"] else "",
         )
+        # O menu do Dropdown às vezes não abre no 1º clique com o mouse
+        # (foco preso no campo de texto / menu cortado pelo diálogo).
+        # Limita a altura do menu para ele caber dentro do diálogo.
+        # Não mexe no seletor de contatos — só neste Dropdown.
+        for _prop in ("max_menu_height", "menu_max_height"):
+            try:
+                setattr(self.tag_dropdown, _prop, 220)
+            except Exception:
+                pass
+        tag_pick_btn = ft.IconButton(
+            icon=ft.icons.ARROW_DROP_DOWN_CIRCLE_OUTLINED,
+            tooltip="Escolher etiqueta com o mouse",
+            on_click=lambda e: self._pick_tag_mouse(),
+        )
 
         templates = db.list_templates()
         self.template_dropdown = ft.Dropdown(
@@ -486,7 +500,8 @@ class MessageDialog(ft.AlertDialog):
                     self.file_preview,
                     ft.Row([self.date_field, self.time_field]),
                     quick_hours,
-                    ft.Row([self.tag_dropdown, self.rec_dropdown], spacing=8),
+                    ft.Row([self.tag_dropdown, tag_pick_btn,
+                            self.rec_dropdown], spacing=4),
                     self.rec_end_field,
                 ], tight=True, spacing=12, scroll=ft.ScrollMode.AUTO),
             ], tight=False, spacing=14),
@@ -634,6 +649,62 @@ class MessageDialog(ft.AlertDialog):
                 self.text_field.value = t["body"]
                 self._safe_update()
                 break
+
+    def _pick_tag_mouse(self):
+        """Escolha de etiqueta 100% com o mouse (botões em diálogo).
+
+        Alternativa ao Dropdown quando o 1º clique não abre o menu.
+        Abre POR CIMA do formulário (sem fechar nada) e só ajusta o
+        valor do Dropdown existente ao escolher. Não toca no seletor
+        de contatos.
+        """
+        def choose(tag_id: str):
+            self.tag_dropdown.value = tag_id
+            try:
+                self.page_ref.close(dlg)
+            except Exception:
+                pass
+            self._safe_update()
+
+        buttons: list = [
+            ft.TextButton("Sem etiqueta",
+                          on_click=lambda e: choose("")),
+        ]
+        try:
+            tags = db.list_tags()
+        except Exception:
+            tags = []
+        for t in tags:
+            try:
+                dot = ft.Container(width=12, height=12, border_radius=6,
+                                   bgcolor=t["color"])
+                buttons.append(ft.TextButton(
+                    content=ft.Row([dot, ft.Text(t["name"])], spacing=8),
+                    on_click=lambda e, tid=str(t["id"]): choose(tid),
+                ))
+            except Exception:
+                continue
+        if len(buttons) == 1:
+            buttons.append(ft.Text("Nenhuma etiqueta criada ainda. "
+                                   "Crie em Etiquetas no menu lateral.",
+                                   size=12))
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Escolher etiqueta"),
+            content=ft.Container(
+                width=320,
+                content=ft.Column(buttons, tight=True, spacing=4,
+                                  scroll=ft.ScrollMode.AUTO),
+            ),
+            actions=[
+                ft.TextButton("Cancelar",
+                              on_click=lambda e: self.page_ref.close(dlg)),
+            ],
+        )
+        try:
+            self.page_ref.open(dlg)
+        except Exception as ex:
+            _log(f"etiqueta pick erro: {ex}")
 
     def _store_attachment(self) -> tuple[str | None, str | None, str | None]:
         if self.pending_file:
